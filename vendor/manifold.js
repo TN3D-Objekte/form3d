@@ -1,3 +1,10 @@
+/**
+ * Manifold – https://github.com/elalish/manifold
+ * @license
+ * Copyright The Manifold Authors
+ * SPDX-License-Identifier: Apache-2.0
+ * Enthält Clipper2 (Boost Software License 1.0). Lizenztexte: vendor/licenses/
+ */
 
 var Module = (() => {
   var _scriptName = import.meta.url;

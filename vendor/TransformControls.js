@@ -1,3 +1,9 @@
+/**
+ * TransformControls – aus three.js r160 (examples/jsm/controls/TransformControls.js)
+ * @license
+ * Copyright 2010-2023 Three.js Authors
+ * SPDX-License-Identifier: MIT
+ */
 import {
 	BoxGeometry,
 	BufferGeometry,
