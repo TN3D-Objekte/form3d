@@ -180,6 +180,7 @@ export function showHelp() {
         <li><b>Fläche zweimal antippen</b> – ganzen Körper wählen, weitere Körper dazutippen</li>
         <li>Unten erscheinen Bewegen, Vereinigen, Abziehen, Farbe, Löschen</li>
         <li>Export als STL/OBJ über das Menü oben links</li></ul></div>` }),
-    h('button', { class: 'btn primary', onclick: () => (el.hidden = true) }, 'Los geht’s')));
+    h('button', { class: 'btn primary', onclick: () => (el.hidden = true) }, 'Los geht’s'),
+    h('p', { class: 'help-foot', html: 'Privates Testprojekt · <a href="datenschutz.html">Datenschutz &amp; Lizenzen</a>' })));
   el.hidden = false;
 }

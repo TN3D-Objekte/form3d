@@ -1156,6 +1156,7 @@ function openMenu() {
     { label: 'Export OBJ', onClick: () => { const l = visible(); if (l.length) download(doc.name + '.obj', exportOBJ(l), 'text/plain'); } },
     '-',
     { label: 'Kurzanleitung', onClick: UI.showHelp },
+    { label: 'Datenschutz & Lizenzen', onClick: () => { location.href = 'datenschutz.html'; } },
   ]);
 }
 
