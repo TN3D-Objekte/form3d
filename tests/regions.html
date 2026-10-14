@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><pre id="o"></pre>
+<script type="module">
+import * as S from '../js/sketch.js';
+const L = (a, b) => ({ type: 'line', a, b });
+const rect = (a, b) => [L(a, [b[0], a[1]]), L([b[0], a[1]], b), L(b, [a[0], b[1]]), L([a[0], b[1]], a)];
+const show = (name, ents) => { const r = S.computeRegions(ents); o.textContent += name + ': ' + r.map(x => x.area.toFixed(1) + '/' + x.holes.length + 'h').join('  ') + '\n'; };
+show('Rechteck+Kreis (1600-314 | 314)', [...rect([60, -60], [100, -20]), { type: 'circle', c: [80, -40], r: 10 }]);
+show('zwei überlappende Rechtecke (3 Flächen)', [...rect([0, 0], [10, 10]), ...rect([5, 5], [15, 15])]);
+show('Rechteck mit Teilungslinie (2x50)', [...rect([0, 0], [10, 10]), L([5, 0], [5, 10])]);
+show('angrenzende Rechtecke, gemeinsame Kante (100 | 50)', [...rect([0, 0], [10, 10]), ...rect([10, 2], [15, 12])]);
+show('Halbkreis aus Bogen+Linie (157)', [{ type: 'arc', c: [0, 0], r: 10, a0: 0, a1: Math.PI }, L([-10, 0], [10, 0])]);
+show('offene Linie (keine)', [L([0, 0], [5, 5]), L([5, 5], [9, 0])]);
+const a = S.arcFrom3([10, 0], [-10, 0], [0, 10]); o.textContent += 'arcFrom3: ' + JSON.stringify(a) + '\n';
+</script>

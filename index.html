@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Form3D">
+<meta name="theme-color" content="#eef0f4">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-180.png">
+<title>Form3D</title>
+<link rel="stylesheet" href="css/app.css">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="overlay"></canvas>
+<header id="topbar"></header>
+<nav id="rail" aria-label="Werkzeuge"></nav>
+<aside id="panel" aria-label="Elemente"></aside>
+<div id="bar" hidden></div>
+<div id="numpad" hidden></div>
+<div id="menu" hidden></div>
+<div id="toast" hidden></div>
+<div id="help" hidden></div>
+<div id="loading">Lade Geometriekern …</div>
+<input id="file" type="file" accept=".form3d,.json,application/json" hidden>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

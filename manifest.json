@@ -1,0 +1,16 @@
+{
+  "name": "Form3D",
+  "short_name": "Form3D",
+  "description": "3D-CAD für iPad und Apple Pencil",
+  "lang": "de",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef0f4",
+  "theme_color": "#eef0f4",
+  "icons": [
+    { "src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
