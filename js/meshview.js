@@ -48,20 +48,33 @@ export function analyze(mesh) {
   if (mesh.f) for (let i = 0; i < nT; i++) tg[i] = Math.floor(mesh.f[i] / 1048576);
 
   // Splitter aus Booleschen Operationen (fast ohne Höhe) haben eine zufällige Normale und oft keine
-  // Kennung. Sie übernehmen beides vom Nachbarn an ihrer langen Kante, sonst erzeugen sie Kanten
-  // mitten in Rundungen und verbinden Flächen, die nicht zusammengehören.
-  const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]], longNb = new Int32Array(nT).fill(-2);
+  // Kennung. Sie übernehmen beides vom nächsten echten Dreieck an ihren langen Kanten (auch über
+  // gestapelte Splitter hinweg), sonst erzeugen sie Kanten mitten in Rundungen und verbinden Flächen,
+  // die nicht zusammengehören.
+  const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]], longEdges = new Map();
   for (let i = 0; i < nT; i++) {
     if (!fa[i]) continue;
     const p = [0, 1, 2].map(k => P(t[3 * i + k]));
     const L = [0, 1, 2].map(k => Math.hypot(p[(k + 1) % 3][0] - p[k][0], p[(k + 1) % 3][1] - p[k][1], p[(k + 1) % 3][2] - p[k][2]));
-    const e = L.indexOf(Math.max(...L)), h = 2 * fa[i] / L[e];
-    if (h < 1e-4 || h < 1e-4 * L[e]) longNb[i] = nb[3 * i + e];
+    const Lm = Math.max(...L), h = 2 * fa[i] / Lm;
+    if (h < 1e-4 || h < 1e-4 * Lm) longEdges.set(i, [0, 1, 2].filter(e => L[e] >= 0.5 * Lm).sort((a, b) => L[b] - L[a]).map(e => nb[3 * i + e]).filter(j => j >= 0));
   }
-  for (let i = 0; i < nT; i++) {
-    let j = longNb[i];
-    for (let k = 0; j >= 0 && longNb[j] !== -2 && k < 8; k++) j = longNb[j];
-    if (j < 0 || longNb[j] !== -2) continue;
+  const donor = new Map();
+  for (const i of longEdges.keys()) {
+    const seen = new Set([i]);
+    let ring = [i], j = -1;
+    for (let k = 0; k < 8 && j < 0 && ring.length; k++) {
+      const next = [];
+      for (const s of ring) for (const n of longEdges.get(s)) {
+        if (seen.has(n)) continue;
+        seen.add(n);
+        if (!longEdges.has(n)) { if (j < 0) j = n; } else next.push(n);
+      }
+      ring = next;
+    }
+    if (j >= 0) donor.set(i, j);
+  }
+  for (const [i, j] of donor) {
     fn[3 * i] = fn[3 * j]; fn[3 * i + 1] = fn[3 * j + 1]; fn[3 * i + 2] = fn[3 * j + 2];
     tg[i] = tg[j];
   }
@@ -121,19 +134,27 @@ export function analyze(mesh) {
 }
 
 // Zusammenhängende glatte Fläche (z. B. Zylindermantel, Rundung) um die ebene Teilfläche fi: über
-// nicht scharfe Kanten verbunden und mit gleicher Rundungs-/Fasenkennung (mesh.f, obere 12 Bit)
+// nicht scharfe Kanten verbunden und mit gleicher Rundungs-/Fasenkennung (mesh.f, obere 12 Bit).
+// Ohne Kennung gehören große ebene Flächen, die nur tangential an Facetten anschließen (Rundung neben
+// Fase oder Deckfläche), nicht dazu: Facetten einer Krümmung sind ähnlich groß wie ihre Nachbarn.
 export function smoothSurface(mesh, an, fi) {
   const t0 = an.faces[fi].tag;
   if (!an.nbr) {
     an.nbr = an.faces.map(() => []);
     for (let k = 0; k < an.smooth.length; k += 2) {
       const a = an.triFace[an.smooth[k]], b = an.triFace[an.smooth[k + 1]];
-      if (a !== b) { an.nbr[a].push(b); an.nbr[b].push(a); }
+      if (a !== b && !an.nbr[a].includes(b)) { an.nbr[a].push(b); an.nbr[b].push(a); }
     }
+    const area = an.faces.map(f => f.tris.reduce((s, ti) => s + an.fa[ti], 0));
+    an.flat = an.faces.map((f, i) => {
+      const ns = an.nbr[i].map(g => area[g]).sort((a, b) => a - b);
+      return !f.tag && ns.length > 0 && area[i] > 8 * ns[ns.length >> 1];
+    });
   }
+  if (an.flat[fi]) return [fi];
   const seen = new Set([fi]), todo = [fi];
   while (todo.length) for (const g of an.nbr[todo.pop()]) {
-    if (seen.has(g) || an.faces[g].tag !== t0) continue;
+    if (seen.has(g) || an.faces[g].tag !== t0 || an.flat[g]) continue;
     seen.add(g); todo.push(g);
   }
   return [...seen];
