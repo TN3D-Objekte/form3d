@@ -9,6 +9,7 @@ import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
 import { exportSTL, exportOBJ, download } from './exporters.js';
+import * as Bug from './bugrec.js';
 
 const $ = id => document.getElementById(id);
 const V3 = a => new THREE.Vector3(a[0], a[1], a[2]);
@@ -379,7 +380,7 @@ function cancelOp() {
 // Flächenauswahl: ganze glatte Fläche (Rundung, Zylinder) statt einzelner Facetten
 function faceSel(bodyId, faceIdx) {
   const b = body(bodyId), an = views.get(bodyId).an, faces = smoothSurface(b.mesh, an, faceIdx);
-  const tag = K.tagOf(b.mesh, an.faces[faceIdx].tris[0]), feature = tag ? b.features?.find(f => f.tag === tag) : null;
+  const tag = an.faces[faceIdx].tag, feature = tag ? b.features?.find(f => f.tag === tag) : null;
   return { bodyId, faceIdx, faces, mesh: b.mesh, feature };
 }
 
@@ -576,11 +577,14 @@ function dragSketch(g, e) {
   vp.requestRender();
 }
 
+// mit Pencil navigieren Finger nur – außer im Zwei-Finger-Modus, da zeichnet ein Finger immer
+const fingersNavOnly = e => e.type === 'touch' && vp.penSeen && !vp.twoFinger;
+
 let drag = null, skDrag = null;
 const selectTool = {
   onDown(e) {
     const o = st.op;
-    if (!o && !st.xf && !(e.type === 'touch' && vp.penSeen)) {
+    if (!o && !st.xf && !fingersNavOnly(e)) {
       skDrag = sketchGrab(e);
       if (skDrag) return true;
     }
@@ -732,7 +736,7 @@ function makeDrawTool(kind) {
     reset() { pts = []; downP = null; dragging = false; hover = null; chainStart = null; vp.requestRender(); },
     busy: () => pts.length > 0,
     onDown(e) {
-      if (e.type === 'touch' && vp.penSeen) return false; // mit Pencil: Finger navigieren nur
+      if (fingersNavOnly(e)) return false;
       const s = snap(e);
       if (!s) return false;
       downP = s.p; downXY = [e.x, e.y]; dragging = false; hover = s;
@@ -1231,7 +1235,9 @@ function openMenu() {
     { label: 'Export STL (3D-Druck)', onClick: () => { const l = visible(); if (l.length) download(doc.name + '.stl', exportSTL(l), 'model/stl'); } },
     { label: 'Export OBJ', onClick: () => { const l = visible(); if (l.length) download(doc.name + '.obj', exportOBJ(l), 'text/plain'); } },
     '-',
-    { label: 'Kurzanleitung', onClick: UI.showHelp },
+    { label: 'Gerät: ' + DEVICES[vp.device] + ' …', onClick: showHelp },
+    { label: 'Kurzanleitung', onClick: showHelp },
+    Bug.recording() ? null : { label: 'Fehler aufzeichnen …', onClick: () => Bug.start({ vp, state: appState, toFile }) },
     { label: 'Datenschutz & Lizenzen', onClick: () => { location.href = 'datenschutz.html'; } },
   ]);
 }
@@ -1400,6 +1406,7 @@ vp.onOverlay = ctx => {
 
 // ---------------------------------------------------------------- Tastatur
 addEventListener('keydown', e => {
+  if (e.target.closest?.('input, textarea')) return;
   if (UI.numpadOpen()) { UI.numpadKey(e.key); e.preventDefault(); return; }
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (mod && k === 'z') { e.shiftKey ? doRedo() : doUndo(); e.preventDefault(); }
@@ -1417,12 +1424,60 @@ addEventListener('keydown', e => {
   } else if ({ v: 'select', l: 'line', r: 'rect', c: 'circle', a: 'arc' }[k]) railPick({ v: 'select', l: 'line', r: 'rect', c: 'circle', a: 'arc' }[k]);
 });
 
+// ---------------------------------------------------------------- Gerät und Steuerung
+// iPad: 1 Finger dreht, 2 verschieben/zoomen, Pencil zeichnet. Handy: 1 Finger zeichnet/tippt, 2 Finger
+// drehen und zoomen, 3 Finger verschieben. PC: Maus und Tastatur (Touch wie iPad).
+const DEVICES = { tablet: 'iPad', phone: 'Handy', pc: 'PC' };
+function setDevice(device) {
+  vp.device = device;
+  try { localStorage.setItem('form3d-device', device); } catch { /* privater Modus */ }
+}
+function guessDevice() {
+  if (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches) return Math.min(screen.width, screen.height) < 600 ? 'phone' : 'tablet';
+  return matchMedia('(pointer: fine)').matches ? 'pc' : 'tablet';
+}
+function showHelp() {
+  UI.showHelp(vp.device, d => { setDevice(d); showHelp(); });
+}
+
+// Zustand für die Fehleraufzeichnung (klein halten: wird nach jeder Eingabe gemerkt)
+function appState() {
+  const o = st.op;
+  return {
+    tool: st.tool, sketchId: st.sketchId, pickPlane: st.pickPlane || undefined, xf: !!st.xf || undefined,
+    op: o ? { type: o.type, kind: o.kind, dist: o.dist, size: o.size } : null,
+    sel: { bodies: sel.bodies, face: sel.face && { bodyId: sel.face.bodyId, faceIdx: sel.face.faceIdx, faces: sel.face.faces.length, feature: sel.face.feature?.tag ?? null }, regions: sel.regions, ents: sel.ents, edges: sel.edges.map(x => ({ bodyId: x.bodyId, idx: x.idx })), con: sel.con && sel.con.id },
+    bodies: doc.bodies.map(b => ({ id: b.id, tris: b.mesh.t.length / 3, vol: +K.props(b.mesh).volume.toFixed(2), features: b.features?.length || 0 })),
+    sketches: doc.sketches.map(s => ({ id: s.id, ents: s.entities.length, cons: s.constraints?.length || 0 })),
+    view: { target: vp.view.target.toArray().map(x => +x.toFixed(3)), dist: +vp.view.dist.toFixed(3), theta: +vp.view.theta.toFixed(4), phi: +vp.view.phi.toFixed(4) },
+    bar: $('bar').hidden ? null : $('bar').innerText.replace(/\s+/g, ' ').trim().slice(0, 200),
+  };
+}
+
+// Aufzeichnung abspielen (tests/replay.js): Ausgangszustand herstellen
+function replayStart(r) {
+  resetSession();
+  endSketch();
+  setSelectTool();
+  fromFile(r.doc);
+  vp.device = r.device;
+  vp.penSeen = !!r.penSeen;
+  Object.assign(vp.view, { dist: r.view.dist, theta: r.view.theta, phi: r.view.phi });
+  vp.view.target.fromArray(r.view.target);
+  sync();
+  vp.render();
+}
+
 // ---------------------------------------------------------------- Start
 async function init() {
   UI.buildRail($('rail'), RAIL, railPick);
   buildTop();
   vp.tool = selectTool;
-  vp.onPen = () => UI.toast('Apple Pencil erkannt – der Stift zeichnet, Finger navigieren');
+  let saved = null;
+  try { saved = localStorage.getItem('form3d-device'); } catch { /* privater Modus */ }
+  vp.device = DEVICES[saved] ? saved : guessDevice();
+  if (innerWidth < 760) $('panel').classList.add('closed');
+  vp.onPen = () => { if (vp.device === 'tablet') UI.toast('Apple Pencil erkannt – der Stift zeichnet, Finger navigieren'); };
   await K.initKernel();
   let waiting = true; // blockierte Datenbank darf den Start nicht aufhalten
   await Promise.race([loadLocal(() => waiting), new Promise(r => setTimeout(r, 4000))]);
@@ -1433,13 +1488,17 @@ async function init() {
   if (!box.isEmpty()) vp.fit(box);
   $('loading').remove();
   try {
-    if (!localStorage.getItem('form3d-help')) { UI.showHelp(); localStorage.setItem('form3d-help', '1'); }
+    if (!localStorage.getItem('form3d-help')) { showHelp(); localStorage.setItem('form3d-help', '1'); }
   } catch { /* privater Modus */ }
   if ('serviceWorker' in navigator && isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-window.form3d = { doc, vp, st, sel, sketch, body, railPick, pick, applyOp, sync, refresh: () => { sync(); refreshOp(); } };
-init().then(() => { if (new URLSearchParams(location.search).has('selftest')) import('../tests/selftest.js'); }).catch(err => {
+window.form3d = { doc, vp, st, sel, sketch, body, railPick, pick, applyOp, sync, refresh: () => { sync(); refreshOp(); }, appState, replayStart };
+init().then(() => {
+  const q = new URLSearchParams(location.search);
+  if (q.has('selftest')) import('../tests/selftest.js');
+  if (q.has('replay')) import('../tests/replay.js');
+}).catch(err => {
   console.error(err);
   $('loading').textContent = 'Start fehlgeschlagen: ' + (err?.message || err);
 });

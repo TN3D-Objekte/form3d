@@ -1,9 +1,9 @@
 // Offline-Cache: Netz zuerst (damit Updates sofort ankommen), sonst aus dem Cache.
 // Service Worker laufen nur über HTTPS oder localhost.
-const CACHE = 'form3d-v4';
+const CACHE = 'form3d-v5';
 const SHELL = [
   './', 'index.html', 'datenschutz.html', 'manifest.json', 'css/app.css',
-  'js/main.js', 'js/viewport.js', 'js/kernel.js', 'js/sketch.js', 'js/meshview.js', 'js/edges.js', 'js/solver.js', 'js/doc.js', 'js/ui.js', 'js/exporters.js',
+  'js/main.js', 'js/viewport.js', 'js/kernel.js', 'js/sketch.js', 'js/meshview.js', 'js/edges.js', 'js/solver.js', 'js/doc.js', 'js/ui.js', 'js/exporters.js', 'js/bugrec.js',
   'vendor/three.module.js', 'vendor/TransformControls.js', 'vendor/manifold.js', 'vendor/manifold.wasm',
   'icons/icon-180.png', 'icons/icon-512.png',
 ];

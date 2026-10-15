@@ -4,7 +4,7 @@ import * as S from '../js/sketch.js';
 import { toFile, fromFile } from '../js/doc.js';
 import { exportSTL } from '../js/exporters.js';
 import { edgeChains, buildEdgeTool, cornerTools } from '../js/edges.js';
-import { analyze, faceLoops } from '../js/meshview.js';
+import { analyze, faceLoops, smoothSurface } from '../js/meshview.js';
 import { solveSketch } from '../js/solver.js';
 const { doc, vp, st, sel, railPick, applyOp } = window.form3d;
 const out = document.createElement('pre');
@@ -207,6 +207,18 @@ try {
   const hole = K.boolean('subtract', cub, K.extrude(S.computeRegions([{ type: 'circle', c: S.regionCenter({ outer: tLoops[0], holes: [] }), r: 10 }]), tp, -50, 1e-3));
   log(genus(hole) === 1, `Durchgangsloch in verschobenem Würfel: Geschlecht ${genus(hole)} (Soll 1, keine Haut)`);
 
+  // Rundung an Bohrungskante: Splitter-Dreiecke aus der Booleschen Operation dürfen keine Linien in der
+  // Rundung erzeugen und die Deckfläche nicht mit Nachbarflächen verbinden
+  const plateH = K.boolean('subtract', K.primitive('box', { l: 50, b: 50, h: 20 }), K.transform(K.primitive('cyl', { h: 30, d: 16 }), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -5, 1]));
+  const holeEdge = edgeChains(plateH).find(ch => ch.closed && ch.pts.every(p => p[2] > 19.9));
+  const filH = K.blend(plateH, [Object.assign(buildEdgeTool(plateH, holeEdge, 'fillet', 2), { tag: 1 })]), anH = analyze(filH);
+  let innerSharp = 0;
+  for (let k = 0; k < anH.sharpTri.length; k += 2) if (anH.tg[anH.sharpTri[k]] && anH.tg[anH.sharpTri[k]] === anH.tg[anH.sharpTri[k + 1]]) innerSharp++;
+  const topH = anH.faces.reduce((best, f, i) => f.n[2] > 0.999 && f.tris.length > (anH.faces[best]?.tris.length || 0) ? i : best, -1);
+  const filF = anH.faces.findIndex(f => f.tag === 1), filS = smoothSurface(filH, anH, filF);
+  log(innerSharp === 0 && smoothSurface(filH, anH, topH).length === 1 && filS.every(g => anH.faces[g].tag === 1),
+    `Bohrungsrundung: ${innerSharp} Linien in der Rundung, Deckfläche einzeln wählbar (${smoothSurface(filH, anH, topH).length}), Rundung ${filS.length} Teilflächen`);
+
   // Rotation: Rechteck x 10..20, y 0..10 um die Y-Achse
   const ring = K.revolve([{ outer: [[10, 0], [20, 0], [20, 10], [10, 10]], holes: [] }], S.BASE_PLANES.xz, { p: [0, 0], d: [0, 1] }, 360);
   const vr = K.props(ring).volume, zs = ring.v.filter((_, i) => i % 3 === 2);
@@ -242,6 +254,29 @@ try {
   for (const q of [[-100, 100], [-60, 100], [-60, 130], [-100, 100]]) tap(...scr(q[0], q[1], 0), T);
   const tri = doc.sketches.find(s => s.id === st.sketchId);
   log(tri?.entities.length === 3 && S.computeRegions(tri.entities).length === 1, 'Finger-Linienzug: ' + tri?.entities.length + ' Linien, Fläche ' + S.computeRegions(tri?.entities || [])[0]?.area);
+
+  // Zwei-Finger-Modus (Handy): 1 Finger zeichnet, 2 Finger drehen/zoomen, 3 Finger verschieben
+  vp.twoFinger = true;
+  const nLines = tri.entities.length, T2 = id => ({ pt: 'touch', id });
+  dragTo(...scr(-140, 60, 0), ...scr(-100, 60, 0), T);
+  log(tri.entities.length === nLines + 1, 'Zwei-Finger-Modus: 1 Finger zieht Linie (' + tri.entities.length + ' Linien)');
+  const v0 = { ...vp.view };
+  fire('pointerdown', 300, 300, T2(901)); fire('pointerdown', 400, 300, T2(902));
+  for (let i = 1; i <= 5; i++) { fire('pointermove', 300 + 12 * i, 300, T2(901)); fire('pointermove', 400 + 12 * i, 300, T2(902)); }
+  const dTheta = vp.view.theta - v0.theta;
+  for (let i = 1; i <= 5; i++) { fire('pointermove', 360 - 10 * i, 300, T2(901)); fire('pointermove', 460 + 10 * i, 300, T2(902)); }
+  fire('pointerup', 310, 300, T2(901)); fire('pointerup', 510, 300, T2(902));
+  log(tri.entities.length === nLines + 1 && dTheta < -0.3 && vp.view.dist < v0.dist * 0.7, `2 Finger: gedreht ${dTheta.toFixed(2)}, Zoom ${(v0.dist / vp.view.dist).toFixed(2)}x, nichts gezeichnet`);
+  const t0 = vp.view.target.clone(), th0 = vp.view.theta;
+  [911, 912, 913].forEach((id, k) => fire('pointerdown', 300 + 40 * k, 300, T2(id)));
+  for (let i = 1; i <= 5; i++) [911, 912, 913].forEach((id, k) => fire('pointermove', 300 + 40 * k + 15 * i, 300, T2(id)));
+  [911, 912, 913].forEach((id, k) => fire('pointerup', 375 + 40 * k, 300, T2(id)));
+  log(vp.view.target.distanceTo(t0) > 1 && vp.view.theta === th0 && tri.entities.length === nLines + 1, `3 Finger: verschoben um ${vp.view.target.distanceTo(t0).toFixed(1)} mm, nicht gedreht`);
+  railPick('select');
+  const th1 = vp.view.theta;
+  dragTo(200, 500, 320, 520, T);
+  log(vp.view.theta === th1, '1 Finger im Auswahlmodus dreht nicht');
+  vp.twoFinger = false;
   out.textContent += 'DONE\n';
 } catch (e) {
   if (e !== 0) log(false, 'Ausnahme: ' + (e.stack || e));

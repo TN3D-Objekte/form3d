@@ -141,7 +141,7 @@ export function renderPanel(el, m, on) {
 
 // ---- Menü, Hinweise, Hilfe ----
 export function openMenu(el, entries) {
-  el.replaceChildren(...entries.map(e => e === '-' ? h('hr') :
+  el.replaceChildren(...entries.filter(Boolean).map(e => e === '-' ? h('hr') :
     h('button', { onclick: () => { el.hidden = true; e.onClick(); } }, e.label)));
   el.hidden = false;
   const close = ev => { if (!el.contains(ev.target)) { el.hidden = true; document.removeEventListener('pointerdown', close, true); } };
@@ -157,18 +157,31 @@ export function toast(msg, ms = 2600) {
   toastTimer = setTimeout(() => (el.hidden = true), ms);
 }
 
-export function showHelp() {
+const NAV = {
+  tablet: `<li><b>1 Finger ziehen</b> – Ansicht drehen</li>
+        <li><b>2 Finger</b> – verschieben und zoomen</li>
+        <li>Sobald der <b>Apple Pencil</b> benutzt wurde, zeichnet nur noch der Stift; Finger navigieren</li>`,
+  phone: `<li><b>2 Finger ziehen</b> – Ansicht drehen, <b>spreizen</b> – zoomen</li>
+        <li><b>3 Finger</b> – verschieben</li>
+        <li><b>1 Finger</b> – nur tippen und zeichnen</li>`,
+  pc: `<li><b>Linke Maustaste</b> – wählen und zeichnen; auf freier Fläche ziehen dreht</li>
+        <li><b>Rechte Taste</b> ziehen – drehen, <b>mittlere Taste</b> oder <b>Umschalt + links</b> – verschieben, <b>Rad</b> – zoomen</li>
+        <li>Tasten: <b>V</b> Auswahl, <b>L</b> Linie, <b>R</b> Rechteck, <b>C</b> Kreis, <b>A</b> Bogen, <b>Entf</b> löschen, <b>Esc</b> abbrechen, <b>Strg+Z/Y</b></li>`,
+};
+
+export function showHelp(device = 'tablet', onDevice) {
   const el = document.getElementById('help');
   el.replaceChildren(h('div', { class: 'help-card' },
     h('h2', {}, 'Form3D – Kurzanleitung'),
+    h('div', { class: 'help-device' }, h('span', {}, 'Ich arbeite am'),
+      h('div', { class: 'seg' }, ...[['tablet', 'iPad'], ['phone', 'Handy'], ['pc', 'PC']].map(([d, label]) =>
+        h('button', { class: d === device ? 'on' : '', onclick: () => onDevice?.(d) }, label)))),
     h('div', { class: 'help-grid', html: `
       <div><h3>Navigieren</h3><ul>
-        <li><b>1 Finger ziehen</b> – Ansicht drehen</li>
-        <li><b>2 Finger</b> – verschieben und zoomen</li>
-        <li><b>Maus</b> – rechte Taste drehen, Rad zoomen, mittlere Taste verschieben</li></ul></div>
+        ${NAV[device] || NAV.tablet}</ul></div>
       <div><h3>Skizzieren</h3><ul>
         <li>Linie, Rechteck, Kreis oder Bogen wählen, dann <b>Ebene oder Körperfläche antippen</b></li>
-        <li>Mit dem <b>Apple Pencil</b> zeichnen (ohne Stift mit dem Finger): ziehen oder Punkt für Punkt tippen</li>
+        <li>${device === 'pc' ? 'Mit der Maus' : device === 'phone' ? 'Mit einem Finger' : 'Mit dem <b>Apple Pencil</b> (ohne Stift mit dem Finger)'} zeichnen: ziehen oder Punkt für Punkt tippen</li>
         <li>Maße nach dem Zeichnen in der Leiste unten antippen und exakt eingeben</li>
         <li>Orange Marken zeigen <b>Kantenmitten</b> (Dreieck) und <b>Mittelpunkte</b> (Kreuz) – darauf wird gefangen; die Rasterweite steht unten links</li>
         <li><b>Punkte und Linien ziehen</b>, um die Skizze zu ändern; Linie oder Kreis antippen für Bedingungen (horizontal, parallel, gleich, tangential …)</li></ul></div>
@@ -181,7 +194,10 @@ export function showHelp() {
         <li><b>Rundung oder Fase antippen</b> – Löschen macht die Kante wieder scharf</li>
         <li><b>Fläche zweimal antippen</b> – ganzen Körper wählen, weitere Körper dazutippen</li>
         <li>Unten erscheinen Bewegen, Vereinigen, Abziehen, Farbe, Löschen</li>
-        <li>Export als STL/OBJ über das Menü oben links</li></ul></div>` }),
+        <li>Export als STL/OBJ über das Menü oben links</li></ul></div>
+      <div><h3>Fehler melden</h3><ul>
+        <li>Menü → <b>Fehler aufzeichnen</b>, Fehler nachstellen, <b>Hier!</b> im richtigen Moment, dann <b>Fertig</b></li>
+        <li>Die Datei mit kurzer Beschreibung teilen oder sichern und weitergeben</li></ul></div>` }),
     h('button', { class: 'btn primary', onclick: () => (el.hidden = true) }, 'Los geht’s'),
     h('p', { class: 'help-foot', html: 'Privates Testprojekt · <a href="datenschutz.html">Datenschutz &amp; Lizenzen</a>' })));
   el.hidden = false;

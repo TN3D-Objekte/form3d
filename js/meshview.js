@@ -30,21 +30,52 @@ export function analyze(mesh) {
     weld[i] = w ?? i;
   }
 
-  // koplanare Nachbardreiecke zu Flächen zusammenfassen, scharfe Kanten sammeln
-  const par = new Int32Array(nT);
-  for (let i = 0; i < nT; i++) par[i] = i;
-  const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
-  const open = new Map(), sharp = [], sharpTri = [], smooth = [];
+  // Nachbarn über gemeinsame Kanten (Paare in Reihenfolge des Auftretens)
+  const open = new Map(), pairs = [], nb = new Int32Array(nT * 3).fill(-1);
   for (let i = 0; i < nT; i++) for (let e = 0; e < 3; e++) {
     if (!fa[i]) break;
     const a = weld[t[3 * i + e]], b = weld[t[3 * i + (e + 1) % 3]];
     const key = a < b ? a * nV + b : b * nV + a;
     const j = open.get(key);
-    if (j === undefined) { open.set(key, i); continue; }
+    if (j === undefined) { open.set(key, 3 * i + e); continue; }
     open.delete(key);
-    const d = fdot(i, j);
+    nb[3 * i + e] = (j / 3) | 0; nb[j] = i;
+    pairs.push(i, (j / 3) | 0, a, b);
+  }
+
+  // Kennung je Dreieck (Rundung/Fase, obere 12 Bit von mesh.f)
+  const tg = new Int32Array(nT);
+  if (mesh.f) for (let i = 0; i < nT; i++) tg[i] = Math.floor(mesh.f[i] / 1048576);
+
+  // Splitter aus Booleschen Operationen (fast ohne Höhe) haben eine zufällige Normale und oft keine
+  // Kennung. Sie übernehmen beides vom Nachbarn an ihrer langen Kante, sonst erzeugen sie Kanten
+  // mitten in Rundungen und verbinden Flächen, die nicht zusammengehören.
+  const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]], longNb = new Int32Array(nT).fill(-2);
+  for (let i = 0; i < nT; i++) {
+    if (!fa[i]) continue;
+    const p = [0, 1, 2].map(k => P(t[3 * i + k]));
+    const L = [0, 1, 2].map(k => Math.hypot(p[(k + 1) % 3][0] - p[k][0], p[(k + 1) % 3][1] - p[k][1], p[(k + 1) % 3][2] - p[k][2]));
+    const e = L.indexOf(Math.max(...L)), h = 2 * fa[i] / L[e];
+    if (h < 1e-4 || h < 1e-4 * L[e]) longNb[i] = nb[3 * i + e];
+  }
+  for (let i = 0; i < nT; i++) {
+    let j = longNb[i];
+    for (let k = 0; j >= 0 && longNb[j] !== -2 && k < 8; k++) j = longNb[j];
+    if (j < 0 || longNb[j] !== -2) continue;
+    fn[3 * i] = fn[3 * j]; fn[3 * i + 1] = fn[3 * j + 1]; fn[3 * i + 2] = fn[3 * j + 2];
+    tg[i] = tg[j];
+  }
+
+  // koplanare Nachbardreiecke zu Flächen zusammenfassen, scharfe Kanten sammeln. Innerhalb einer
+  // Rundung/Fase (gleiche Kennung) gibt es keine scharfen Kanten.
+  const par = new Int32Array(nT);
+  for (let i = 0; i < nT; i++) par[i] = i;
+  const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+  const sharp = [], sharpTri = [], smooth = [];
+  for (let k = 0; k < pairs.length; k += 4) {
+    const i = pairs[k], j = pairs[k + 1], d = fdot(i, j);
     if (d > 0.99999) par[find(i)] = find(j);
-    else if (d < COS_EDGE) { sharp.push(a, b); sharpTri.push(i, j); } // Dreieck i enthält die Halbkante a→b
+    else if (d < COS_EDGE && !(tg[i] && tg[i] === tg[j])) { sharp.push(pairs[k + 2], pairs[k + 3]); sharpTri.push(i, j); } // Dreieck i enthält die Halbkante a→b
     else smooth.push(i, j);
   }
 
@@ -52,10 +83,10 @@ export function analyze(mesh) {
   for (let i = 0; i < nT; i++) {
     const r = find(i);
     let fi = rootIdx.get(r);
-    if (fi === undefined) { fi = faces.length; rootIdx.set(r, fi); faces.push({ tris: [], n: [0, 0, 1], big: -1 }); }
+    if (fi === undefined) { fi = faces.length; rootIdx.set(r, fi); faces.push({ tris: [], n: [0, 0, 1], big: -1, tag: 0 }); }
     const f = faces[fi];
     f.tris.push(i);
-    if (fa[i] > f.big) { f.big = fa[i]; f.n = [fn[3 * i], fn[3 * i + 1], fn[3 * i + 2]]; }
+    if (fa[i] > f.big) { f.big = fa[i]; f.n = [fn[3 * i], fn[3 * i + 1], fn[3 * i + 2]]; f.tag = tg[i]; }
     triFace[i] = fi;
   }
 
@@ -73,7 +104,7 @@ export function analyze(mesh) {
     let nx = 0, ny = 0, nz = 0;
     for (let k = start[vi]; k < start[vi + 1]; k++) {
       const j = inc[k];
-      if (j === i || fdot(i, j) > COS_CREASE) { nx += fn[3 * j] * fa[j]; ny += fn[3 * j + 1] * fa[j]; nz += fn[3 * j + 2] * fa[j]; }
+      if (j === i || fdot(i, j) > COS_CREASE || (tg[i] && tg[i] === tg[j])) { nx += fn[3 * j] * fa[j]; ny += fn[3 * j + 1] * fa[j]; nz += fn[3 * j + 2] * fa[j]; }
     }
     const l = Math.hypot(nx, ny, nz) || 1;
     nor[o] = nx / l; nor[o + 1] = ny / l; nor[o + 2] = nz / l;
@@ -84,7 +115,7 @@ export function analyze(mesh) {
   for (let k = 0; k < sharp.length; k++) edges.set(v.subarray(sharp[k] * 3, sharp[k] * 3 + 3), k * 3);
   const corners = [...cornerSet].map(i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]]);
 
-  an = { pos, nor, edges, triFace, faces, corners, fa, fn, sharp, sharpTri, weld, smooth };
+  an = { pos, nor, edges, triFace, faces, corners, fa, fn, tg, sharp, sharpTri, weld, smooth };
   cacheMap.set(mesh, an);
   return an;
 }
@@ -92,7 +123,7 @@ export function analyze(mesh) {
 // Zusammenhängende glatte Fläche (z. B. Zylindermantel, Rundung) um die ebene Teilfläche fi: über
 // nicht scharfe Kanten verbunden und mit gleicher Rundungs-/Fasenkennung (mesh.f, obere 12 Bit)
 export function smoothSurface(mesh, an, fi) {
-  const tag = ti => (mesh.f ? Math.floor(mesh.f[ti] / 1048576) : 0), t0 = tag(an.faces[fi].tris[0]);
+  const t0 = an.faces[fi].tag;
   if (!an.nbr) {
     an.nbr = an.faces.map(() => []);
     for (let k = 0; k < an.smooth.length; k += 2) {
@@ -102,7 +133,7 @@ export function smoothSurface(mesh, an, fi) {
   }
   const seen = new Set([fi]), todo = [fi];
   while (todo.length) for (const g of an.nbr[todo.pop()]) {
-    if (seen.has(g) || tag(an.faces[g].tris[0]) !== t0) continue;
+    if (seen.has(g) || an.faces[g].tag !== t0) continue;
     seen.add(g); todo.push(g);
   }
   return [...seen];

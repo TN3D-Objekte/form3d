@@ -23,6 +23,9 @@ export class Viewport {
     this.raycaster = new THREE.Raycaster();
     this.tool = null;
     this.penSeen = false;
+    // Gerät: 'tablet' (1 Finger dreht, 2 verschieben/zoomen), 'phone' (1 Finger nur Werkzeug/Tippen,
+    // 2 Finger drehen + zoomen, 3 Finger verschieben), 'pc' (Maus; Touch wie Tablet)
+    this.device = 'tablet';
     this._anim = 0;
     this.onOverlay = null;
     this.onBeforeRender = null;
@@ -40,6 +43,9 @@ export class Viewport {
     new ResizeObserver(() => this.resize()).observe(canvas);
     this.resize();
   }
+
+  get twoFinger() { return this.device === 'phone'; }
+  set twoFinger(on) { this.device = on ? 'phone' : 'tablet'; }
 
   _buildGrid() {
     const mat = (color, opacity) => new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
@@ -215,6 +221,15 @@ export class Viewport {
       this.requestRender();
     };
     const mid = () => { const [a, b] = touches(); return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) || 1 }; };
+    const centroid = () => { const t = touches(); return { x: t.reduce((s, p) => s + p.x, 0) / t.length, y: t.reduce((s, p) => s + p.y, 0) / t.length }; };
+    // Mehrfinger-Geste (neu) beginnen – auch wenn Finger dazukommen oder abheben, damit nichts springt
+    const startGesture = () => {
+      if (this.twoFinger && touches().length >= 3) { mode = 'pan'; const c = centroid(); grab = this.viewPlanePoint(c.x, c.y); return; }
+      mode = 'pinch';
+      const m = mid();
+      pinch = { d: m.d, dist: v.dist, x: m.x, y: m.y };
+      grab = this.twoFinger ? null : this.viewPlanePoint(m.x, m.y);
+    };
 
     el.addEventListener('pointerdown', e => {
       if (this.gizmo.dragging) return;
@@ -223,33 +238,43 @@ export class Viewport {
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
       if (e.pointerType === 'pen' && !this.penSeen) { this.penSeen = true; this.onPen?.(); }
       if (e.pointerType === 'touch') {
-        const n = touches().length;
-        if (n === 2) {
+        if (touches().length >= 2) {
           if (mode === 'tool') this.tool?.onCancel?.();
-          mode = 'pinch';
-          const m = mid();
-          pinch = { d: m.d, dist: v.dist };
-          grab = this.viewPlanePoint(m.x, m.y);
+          down = null;
+          startGesture();
           return;
         }
-        if (n > 2) return;
       }
       down = { id: e.pointerId, x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, moved: false, button: e.button };
       if (e.pointerType === 'mouse' && e.button === 2) { mode = 'orbit'; down.moved = true; return; }
-      if (e.pointerType === 'mouse' && e.button === 1) { mode = 'pan'; grab = this.viewPlanePoint(e.clientX, e.clientY); return; }
-      mode = this.tool?.onDown?.(ev(e)) ? 'tool' : 'orbit';
+      if (e.pointerType === 'mouse' && (e.button === 1 || e.button === 0 && e.shiftKey)) { mode = 'pan'; grab = this.viewPlanePoint(e.clientX, e.clientY); return; }
+      mode = this.tool?.onDown?.(ev(e)) ? 'tool' : this.twoFinger && e.pointerType === 'touch' ? 'tap' : 'orbit';
     });
 
     el.addEventListener('pointermove', e => {
       const p = pts.get(e.pointerId);
       if (!p) { if (e.pointerType !== 'touch' && !this.gizmo.dragging) this.tool?.onHover?.(ev(e)); return; }
       p.x = e.clientX; p.y = e.clientY;
+      if (mode === 'pan') { if (p.type === 'touch') { const c = centroid(); zoomAt(c.x, c.y, v.dist); } return; }
       if (mode === 'pinch') {
-        if (p.type === 'touch' && touches().length >= 2) { const m = mid(); zoomAt(m.x, m.y, pinch.dist * pinch.d / m.d); }
+        if (p.type !== 'touch' || touches().length < 2) return;
+        const m = mid();
+        if (!this.twoFinger) return zoomAt(m.x, m.y, pinch.dist * pinch.d / m.d);
+        // zwei Finger gemeinsam ziehen = drehen, spreizen = zoomen zur Fingermitte
+        v.theta -= (m.x - pinch.x) * 0.008;
+        v.phi = clamp(v.phi - (m.y - pinch.y) * 0.008, 0.001, Math.PI - 0.001);
+        this.applyView();
+        const g = this.viewPlanePoint(m.x, m.y);
+        v.dist = clamp(v.dist * pinch.d / m.d, 5, 12000);
+        this.applyView();
+        v.target.add(g).sub(this.viewPlanePoint(m.x, m.y));
+        Object.assign(pinch, { x: m.x, y: m.y, d: m.d });
+        this.requestRender();
         return;
       }
       if (!down || e.pointerId !== down.id) return;
       if (mode === 'tool') this.tool?.onMove?.(ev(e));
+      else if (mode === 'tap') { if (Math.hypot(e.clientX - down.x, e.clientY - down.y) >= 7) down.moved = true; }
       else if (mode === 'orbit') {
         if (!down.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 7) return;
         if (!down.moved) { down.moved = true; down.lx = e.clientX; down.ly = e.clientY; }
@@ -262,10 +287,13 @@ export class Viewport {
 
     const end = (e, cancelled) => {
       if (!pts.delete(e.pointerId)) return;
-      if (mode === 'pinch') { if (touches().length < 2) { mode = null; down = null; grab = null; } return; }
+      if (mode === 'pinch' || mode === 'pan') {
+        if (touches().length >= 2) startGesture(); else { mode = null; down = null; grab = null; }
+        return;
+      }
       if (!down || e.pointerId !== down.id) return;
       if (mode === 'tool') cancelled ? this.tool?.onCancel?.() : this.tool?.onUp?.(ev(e));
-      else if (mode === 'orbit' && !down.moved && !cancelled) {
+      else if ((mode === 'orbit' || mode === 'tap') && !down.moved && !cancelled) {
         const now = performance.now();
         const dbl = now - lastTap.t < 380 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 24;
         lastTap = { t: dbl ? 0 : now, x: e.clientX, y: e.clientY };

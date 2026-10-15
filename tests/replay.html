@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Form3D – Aufzeichnung abspielen</title>
+<style>
+  body { margin: 0; font: 12px/1.4 monospace; background: #fff; }
+  iframe { display: block; border: 0; }
+  #out { margin: 0; padding: 8px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<!-- Entwicklerwerkzeug: tests/replay.html?file=<Pfad zur Fehlerdatei> spielt eine Aufzeichnung in einem Rahmen
+     in der aufgezeichneten Bildschirmgröße ab. Ergebnis und Abweichungen erscheinen unten. -->
+<pre id="out"></pre>
+<script type="module">
+const out = document.getElementById('out');
+const file = new URLSearchParams(location.search).get('file');
+try {
+  const r = await (await fetch(file)).json();
+  const f = document.createElement('iframe');
+  f.width = r.screen.w; f.height = r.screen.h;
+  f.src = '../index.html?replay=' + encodeURIComponent(new URL(file, location.href).href);
+  document.body.prepend(f);
+} catch (e) { out.textContent = 'Datei nicht lesbar: ' + e; }
+</script>
+</body>
+</html>
