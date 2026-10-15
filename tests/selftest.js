@@ -214,7 +214,7 @@ try {
   log(ellIn.length === 1 && realFaces(ellF) <= realFaces(ell) + 1 + 4, `Fase an Innenkante, verschoben: ${realFaces(ellF)} Flächen (Soll ≤ ${realFaces(ell) + 5})`);
   // Eckübergänge: alle Kanten verrundet → keine scharfen Kanten, Volumen wie gerundeter Quader
   const rbox = (l, b, h, r) => (l - 2 * r) * (b - 2 * r) * (h - 2 * r) + 2 * r * ((l - 2 * r) * (b - 2 * r) + (l - 2 * r) * (h - 2 * r) + (b - 2 * r) * (h - 2 * r)) + Math.PI * r * r * (l + b + h - 6 * r) + 4 / 3 * Math.PI * r ** 3;
-  const filletAll = (m, pick, r) => { const ch = edgeChains(m).filter(pick); return K.blend(m, [...ch.map(c => buildEdgeTool(m, c, 'fillet', r)), ...cornerTools(m, ch, 'fillet', r)]); };
+  const filletAll = (m, pick, r) => { const ch = edgeChains(m).filter(pick); return K.blend(m, [...ch.map(c => buildEdgeTool(m, c, 'fillet', r, ch)), ...cornerTools(m, ch, 'fillet', r)]); };
   const rb = filletAll(shift(bx), () => true, 5), vRb = volOf(rb);
   log(analyze(rb).sharp.length === 0 && Math.abs(vRb - rbox(50, 50, 30, 5)) < 0.002 * vRb, `Alle 12 Kanten R5 mit Kugelecken: ${analyze(rb).sharp.length / 2} scharfe Kanten, V ${vRb.toFixed(0)} (Soll ${rbox(50, 50, 30, 5).toFixed(0)})`);
   const pocket = K.boolean('subtract', K.primitive('box', { l: 60, b: 50, h: 30 }), K.extrude([{ outer: [[-20, -15], [20, -15], [20, 15], [-20, 15]], holes: [] }], { ...S.BASE_PLANES.xy, o: [0, 0, 10] }, 25));
@@ -246,6 +246,16 @@ try {
       if (Math.hypot(q[0] + 1, q[1] - 1) < 2.1 && -0.8 * (q[0] + 1) + 0.6 * (q[1] - 1) > 0.8) tip++; // vor der Spitze bei (-1, 1)
     }
     log(far < 2.05 && tip > 0, `Spitze Zunge, Bodenrundung R2: max. Abstand zur Wand ${far.toFixed(2)} mm (Soll ≤ 2), Rundung um die Spitze: ${tip} Punkte`);
+  }
+  // Außenkante allein verrundet, endet an einer stumpfen Ecke (103°), deren Nachbarkante scharf bleibt: Die
+  // Rundung läuft bis in die Nachbarwand durch, an der Ecke bleibt kein spitzer Zipfel stehen
+  {
+    const pent = K.extrude([{ outer: [[0, 0], [30, -25], [50, -10], [50, 50], [0, 50]], holes: [] }], S.BASE_PLANES.xy, 55);
+    const e = edgeChains(pent).filter(ch => ch.pts.every(p => p[2] > 54.99 && Math.abs((p[0] - 30) * 0.6 - (p[1] + 25) * 0.8) < 1e-3));
+    const r = K.blend(pent, e.map(ch => buildEdgeTool(pent, ch, 'fillet', 2, e)));
+    let tip = Infinity;
+    for (let i = 0; i < r.v.length; i += 3) tip = Math.min(tip, Math.hypot(r.v[i] - 30, r.v[i + 1] + 25, r.v[i + 2] - 55));
+    log(e.length === 1 && tip > 0.5, `Rundung an stumpfer Ecke ohne Nachbarrundung: Ecke ${tip.toFixed(2)} mm abgetragen (Soll > 0,5)`);
   }
   // Nach Verrundung der Oberkante wählt Antippen der senkrechten Kante nur diese (nicht den Bogen dahinter)
   const tf = K.blend(bx, edgeChains(bx).filter(ch => !vertical(ch) && ch.pts.every(p => p[2] > 29.9 && p[1] < -24.9)).map(ch => buildEdgeTool(bx, ch, 'fillet', 2)));
@@ -289,7 +299,7 @@ try {
     let ok = false, msg = '';
     try {
       const chains = joinChains(c1, tangentChains(c1, [front]));
-      const c2 = K.blend(c1, chains.map(ch => Object.assign(buildEdgeTool(c1, ch, 'fillet', 2), { tag: 2 })));
+      const c2 = K.blend(c1, chains.map(ch => Object.assign(buildEdgeTool(c1, ch, 'fillet', 2, chains), { tag: 2 })));
       const dv = K.props(c1).volume - K.props(c2).volume;
       ok = chains.length === 1 && dv > 80 && dv < 110; msg = `${chains[0].segs.length} Segmente, ΔV ${dv.toFixed(1)}`;
     } catch (e) { msg = e.message; }

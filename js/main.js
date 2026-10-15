@@ -1215,7 +1215,7 @@ function nextTag(b) {
 function edgeTools(b, picked, kind, size) {
   const make = list => {
     const chains = joinChains(b.mesh, list), base = nextTag(b);
-    const ts = [...chains.map(ch => buildEdgeTool(b.mesh, ch, kind, size)), ...cornerTools(b.mesh, chains, kind, size)];
+    const ts = [...chains.map(ch => buildEdgeTool(b.mesh, ch, kind, size, chains)), ...cornerTools(b.mesh, chains, kind, size)];
     ts.forEach((t, i) => Object.assign(t, { tag: base + i, kind, size, links: t.chains?.map(ci => base + ci) }));
     return ts;
   };

@@ -152,14 +152,15 @@ export function isConvex(mesh, chain) {
 
 // Werkzeugkörper für eine Kante. Konvexe Kanten: Werkzeug wird abgezogen, konkave: angefügt.
 // trim: Ebenen { n, o }, an denen der Kern das Werkzeug abschneidet (behalten wird n·x ≥ o).
-export function buildEdgeTool(mesh, chain, kind, size) {
-  return { ...edgeTool(mesh, chain, kind, size, 0), heal: edgeTool(mesh, chain, kind, size, GROW).mesh };
+// chains: alle Kanten, die im selben Schritt verrundet werden (für die Enden an gemeinsamen Ecken).
+export function buildEdgeTool(mesh, chain, kind, size, chains = []) {
+  return { ...edgeTool(mesh, chain, kind, size, 0, chains), heal: edgeTool(mesh, chain, kind, size, GROW, chains).mesh };
 }
 
 // grow: Profil um diesen Betrag ins Material (bzw. bei Innenkanten in den Hohlraum) versetzt. Daraus wird
 // das Volumen gemerkt, mit dem sich die Rundung wieder löschen lässt; so liegen beim Löschen keine
 // Flächen genau aufeinander.
-function edgeTool(mesh, chain, kind, size, grow) {
+function edgeTool(mesh, chain, kind, size, grow, chains) {
   const { fn, weld } = analyze(mesh), { v, t } = mesh, segs = chain.segs, m = segs.length;
   const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
   const nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
@@ -225,15 +226,20 @@ function edgeTool(mesh, chain, kind, size, grow) {
       const c = convex ? lo : -hi;
       if (c >= 0.05) {
         // Die Verlängerung bleibt nur hinter (beim Abziehen: vor) der Endfläche, wenn das Profil nicht seitlich
-        // über sie hinausragt. An stumpfen Ecken tut es das: Dann endet das Werkzeug an der Gehrung zwischen
-        // der anderen Fläche der Kante und der Endfläche (knapp darüber hinaus, damit sich die Werkzeuge überlappen).
+        // über sie hinausragt. An stumpfen Ecken tut es das. Wird die Nachbarkante (zwischen dieser Fläche und
+        // der Endfläche) mitverrundet, endet das Werkzeug an der Gehrung zwischen der anderen Fläche der Kante
+        // und der Endfläche (knapp darüber hinaus, damit sich die Werkzeuge überlappen). Sonst läuft die Rundung
+        // bis in die Endfläche durch (knapp über sie hinaus) – an der Gehrung bliebe ein spitzer Zipfel stehen.
         if (ends.length === 1) {
           const ne = ends[0];
+          const has = (g, n) => [nrm(g.t1), nrm(g.t2)].some(m => dot(m, n) > 0.999);
+          const filleted = nk => chains.some(o => o !== chain && !o.closed && [o.segs[0].u === vi && o.segs[0], o.segs[o.segs.length - 1].v === vi && o.segs[o.segs.length - 1]]
+            .some(g => g && has(g, nk) && has(g, ne)));
           for (const [nk, nj] of [[n1, n2], [n2, n1]]) {
             let tk = norm(cross(nk, out));
             if (dot(tk, nj) * sgn > 0) tk = tk.map(x => -x); // in der Fläche von der Kante weg
             if (-sgn * dot(ne, tk) <= 0.05 || dot(ne, nj) > 0.98) continue; // tangential anschließend: keine Ecke
-            const keep = norm(sub(ne, nj).map(x => -sgn * x)), o = dot(keep, p) - 0.01;
+            const keep = filleted(nk) ? norm(sub(ne, nj).map(x => -sgn * x)) : ne.map(x => -sgn * x), o = dot(keep, p) - 0.01;
             if (chain.pts.some(q => dot(keep, q) < o - 1e-6)) break;
             trim.push({ n: keep, o });
             break;
