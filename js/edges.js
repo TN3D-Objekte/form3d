@@ -157,8 +157,24 @@ function edgeTool(mesh, chain, kind, size, grow) {
     const alpha = Math.acos(Math.max(-1, Math.min(1, dot(t1, t2))));
     const d = kind === 'fillet' ? size / Math.tan(alpha / 2) : size;
     if (near.length === 2) { // Krümmung der Kante: Werkzeug darf auf der Innenseite nicht überschlagen (Radius gleich dem Kantenradius geht: Kugelecke)
-      const kv = sub(dirs[near[1]], dirs[near[0]]), sl = s => Math.hypot(...sub(P(segs[s].v), P(segs[s].u)));
-      const k = Math.hypot(...kv) / ((sl(near[0]) + sl(near[1])) / 2);
+      // Boolesche Ergebnisse zerteilen Kanten oft in winzige Stücke (z. B. an einer Fase), auf die sich dann
+      // der ganze Knick einer Polygonecke drängt. Solche Splitter werden mit dem nächsten langen Stück
+      // zusammengefasst, sonst erscheint die Kante dort viel stärker gekrümmt, als sie ist.
+      const sl = s => Math.hypot(...sub(P(segs[s].v), P(segs[s].u)));
+      const step = (s, ds) => (chain.closed ? (s + ds + m) % m : s + ds);
+      let a = near[0], b = near[1], la = sl(a), lb = sl(b);
+      for (let n = 0; n < m; n++) {
+        const a2 = step(a, -1);
+        if (a2 < 0 || a2 === b || la >= sl(a2) / 2) break;
+        a = a2; la += sl(a2);
+      }
+      for (let n = 0; n < m; n++) {
+        const b2 = step(b, 1);
+        if (b2 >= m || b2 === a || lb >= sl(b2) / 2) break;
+        b = b2; lb += sl(b2);
+      }
+      const kv = sub(dirs[b], dirs[a]);
+      const k = Math.hypot(...kv) / (la + lb - (sl(a) + sl(b)) / 2);
       if (k > 1e-9 && [t1, t2].some(tt => dot(tt, norm(kv)) > 0.5) && d > 1.001 / k) throw new Error('Radius zu groß für diese Kante');
     }
     const A = add(p, t1, d), B = add(p, t2, d);

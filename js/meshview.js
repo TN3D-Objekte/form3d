@@ -105,7 +105,8 @@ export function analyze(mesh) {
 
   // Nachbarflächen über glatte Kanten. Ohne Kennung gelten große ebene Flächen, die nur tangential an
   // Facetten anschließen (Rundung neben Fase oder Deckfläche), als eben: Facetten einer Krümmung sind
-  // ähnlich groß wie ihre Nachbarn.
+  // ähnlich groß wie ihre Nachbarn. Verglichen wird mit den Nachbarn ohne Kennung, falls es welche gibt:
+  // Eine Zylinderfacette unter einer Rundung grenzt an viele kleine Rundungsfacetten, bleibt aber gekrümmt.
   const nbr = faces.map(() => []);
   for (let k = 0; k < smooth.length; k += 2) {
     const a = triFace[smooth[k]], b = triFace[smooth[k + 1]];
@@ -113,7 +114,8 @@ export function analyze(mesh) {
   }
   const area = faces.map(f => f.tris.reduce((s, ti) => s + fa[ti], 0));
   const flat = faces.map((f, i) => {
-    const ns = nbr[i].map(g => area[g]).sort((a, b) => a - b);
+    const plain = nbr[i].filter(g => !faces[g].tag);
+    const ns = (plain.length ? plain : nbr[i]).map(g => area[g]).sort((a, b) => a - b);
     return !f.tag && ns.length > 0 && area[i] > 8 * ns[ns.length >> 1];
   });
 
