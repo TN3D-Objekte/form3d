@@ -467,23 +467,23 @@ try {
   const tri = doc.sketches.find(s => s.id === st.sketchId);
   log(tri?.entities.length === 3 && S.computeRegions(tri.entities).length === 1, 'Finger-Linienzug: ' + tri?.entities.length + ' Linien, Fläche ' + S.computeRegions(tri?.entities || [])[0]?.area);
 
-  // Zwei-Finger-Modus (Handy): 1 Finger zeichnet, 2 Finger drehen/zoomen, 3 Finger verschieben
+  // Zwei-Finger-Modus (Handy): 1 Finger zeichnet, 2 Finger verschieben/zoomen, 3 Finger drehen
   vp.twoFinger = true;
   const nLines = tri.entities.length, T2 = id => ({ pt: 'touch', id });
   dragTo(...scr(-140, 60, 0), ...scr(-100, 60, 0), T);
   log(tri.entities.length === nLines + 1, 'Zwei-Finger-Modus: 1 Finger zieht Linie (' + tri.entities.length + ' Linien)');
-  const v0 = { ...vp.view };
+  const v0 = { ...vp.view, target: vp.view.target.clone() };
   fire('pointerdown', 300, 300, T2(901)); fire('pointerdown', 400, 300, T2(902));
   for (let i = 1; i <= 5; i++) { fire('pointermove', 300 + 12 * i, 300, T2(901)); fire('pointermove', 400 + 12 * i, 300, T2(902)); }
-  const dTheta = vp.view.theta - v0.theta;
+  const dTheta = vp.view.theta - v0.theta, moved = vp.view.target.distanceTo(v0.target);
   for (let i = 1; i <= 5; i++) { fire('pointermove', 360 - 10 * i, 300, T2(901)); fire('pointermove', 460 + 10 * i, 300, T2(902)); }
   fire('pointerup', 310, 300, T2(901)); fire('pointerup', 510, 300, T2(902));
-  log(tri.entities.length === nLines + 1 && dTheta < -0.3 && vp.view.dist < v0.dist * 0.7, `2 Finger: gedreht ${dTheta.toFixed(2)}, Zoom ${(v0.dist / vp.view.dist).toFixed(2)}x, nichts gezeichnet`);
+  log(tri.entities.length === nLines + 1 && dTheta === 0 && moved > 1 && vp.view.dist < v0.dist * 0.7, `2 Finger: verschoben um ${moved.toFixed(1)} mm, gedreht ${dTheta.toFixed(2)}, Zoom ${(v0.dist / vp.view.dist).toFixed(2)}x, nichts gezeichnet`);
   const t0 = vp.view.target.clone(), th0 = vp.view.theta;
   [911, 912, 913].forEach((id, k) => fire('pointerdown', 300 + 40 * k, 300, T2(id)));
   for (let i = 1; i <= 5; i++) [911, 912, 913].forEach((id, k) => fire('pointermove', 300 + 40 * k + 15 * i, 300, T2(id)));
   [911, 912, 913].forEach((id, k) => fire('pointerup', 375 + 40 * k, 300, T2(id)));
-  log(vp.view.target.distanceTo(t0) > 1 && vp.view.theta === th0 && tri.entities.length === nLines + 1, `3 Finger: verschoben um ${vp.view.target.distanceTo(t0).toFixed(1)} mm, nicht gedreht`);
+  log(vp.view.target.distanceTo(t0) < 1e-6 && vp.view.theta - th0 < -0.3 && tri.entities.length === nLines + 1, `3 Finger: gedreht ${(vp.view.theta - th0).toFixed(2)}, verschoben ${vp.view.target.distanceTo(t0).toFixed(1)} mm`);
   railPick('select');
   const th1 = vp.view.theta;
   dragTo(200, 500, 320, 520, T);

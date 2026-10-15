@@ -24,7 +24,7 @@ export class Viewport {
     this.tool = null;
     this.penSeen = false;
     // Gerät: 'tablet' (1 Finger dreht, 2 verschieben/zoomen), 'phone' (1 Finger nur Werkzeug/Tippen,
-    // 2 Finger drehen + zoomen, 3 Finger verschieben), 'pc' (Maus; Touch wie Tablet)
+    // 2 Finger verschieben + zoomen, 3 Finger drehen), 'pc' (Maus; Touch wie Tablet)
     this.device = 'tablet';
     this._anim = 0;
     this.onOverlay = null;
@@ -237,11 +237,11 @@ export class Viewport {
     const centroid = () => { const t = touches(); return { x: t.reduce((s, p) => s + p.x, 0) / t.length, y: t.reduce((s, p) => s + p.y, 0) / t.length }; };
     // Mehrfinger-Geste (neu) beginnen – auch wenn Finger dazukommen oder abheben, damit nichts springt
     const startGesture = () => {
-      if (this.twoFinger && touches().length >= 3) { mode = 'pan'; const c = centroid(); grab = this.viewPlanePoint(c.x, c.y); return; }
+      if (this.twoFinger && touches().length >= 3) { mode = 'orbit3'; pinch = centroid(); return; }
       mode = 'pinch';
       const m = mid();
       pinch = { d: m.d, dist: v.dist, x: m.x, y: m.y, a: m.a, tw: 0 };
-      grab = this.twoFinger ? null : this.viewPlanePoint(m.x, m.y);
+      grab = this.viewPlanePoint(m.x, m.y);
     };
 
     el.addEventListener('pointerdown', e => {
@@ -268,23 +268,21 @@ export class Viewport {
       const p = pts.get(e.pointerId);
       if (!p) { if (e.pointerType !== 'touch' && !this.gizmo.dragging) this.tool?.onHover?.(ev(e)); return; }
       p.x = e.clientX; p.y = e.clientY;
-      if (mode === 'pan') { if (p.type === 'touch') { const c = centroid(); zoomAt(c.x, c.y, v.dist); } return; }
-      if (mode === 'pinch') {
+      if (mode === 'orbit3') { // Handy: drei Finger gemeinsam ziehen = drehen
+        if (p.type !== 'touch') return;
+        const c = centroid();
+        v.theta -= (c.x - pinch.x) * 0.008;
+        v.phi = clamp(v.phi - (c.y - pinch.y) * 0.008, 0.001, Math.PI - 0.001);
+        pinch = c;
+        this.requestRender();
+        return;
+      }
+      if (mode === 'pinch') { // zwei Finger gemeinsam ziehen = verschieben, spreizen = zoomen zur Fingermitte
         if (p.type !== 'touch' || touches().length < 2) return;
         const m = mid();
         twist(m);
-        if (!this.twoFinger) { this.applyView(); return zoomAt(m.x, m.y, pinch.dist * pinch.d / m.d); }
-        // zwei Finger gemeinsam ziehen = drehen, spreizen = zoomen zur Fingermitte
-        v.theta -= (m.x - pinch.x) * 0.008;
-        v.phi = clamp(v.phi - (m.y - pinch.y) * 0.008, 0.001, Math.PI - 0.001);
         this.applyView();
-        const g = this.viewPlanePoint(m.x, m.y);
-        v.dist = clamp(v.dist * pinch.d / m.d, 5, 12000);
-        this.applyView();
-        v.target.add(g).sub(this.viewPlanePoint(m.x, m.y));
-        Object.assign(pinch, { x: m.x, y: m.y, d: m.d });
-        this.requestRender();
-        return;
+        return zoomAt(m.x, m.y, pinch.dist * pinch.d / m.d);
       }
       if (!down || e.pointerId !== down.id) return;
       if (mode === 'tool') this.tool?.onMove?.(ev(e));
@@ -301,7 +299,7 @@ export class Viewport {
 
     const end = (e, cancelled) => {
       if (!pts.delete(e.pointerId)) return;
-      if (mode === 'pinch' || mode === 'pan') {
+      if (mode === 'pinch' || mode === 'orbit3') {
         if (touches().length >= 2) startGesture(); else { mode = null; down = null; grab = null; }
         return;
       }

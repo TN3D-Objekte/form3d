@@ -1667,7 +1667,7 @@ addEventListener('keydown', e => {
 
 // ---------------------------------------------------------------- Gerät und Steuerung
 // iPad: 1 Finger dreht, 2 verschieben/zoomen, Pencil zeichnet. Handy: 1 Finger zeichnet/tippt, 2 Finger
-// drehen und zoomen, 3 Finger verschieben. Beide: 2 Finger umeinander drehen = Drehteller. PC: Maus und
+// verschieben und zoomen, 3 Finger drehen. Beide: 2 Finger umeinander drehen = Drehteller. PC: Maus und
 // Tastatur (Touch wie iPad).
 const DEVICES = { tablet: 'iPad', phone: 'Handy', pc: 'PC' };
 function setDevice(device) {
