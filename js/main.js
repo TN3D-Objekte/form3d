@@ -607,10 +607,19 @@ function deleteSelection() {
       s.constraints = (s.constraints || []).filter(c => has(c.a) && has(c.b));
     }
   } else if (sel.bodies.length) removeBodies(sel.bodies);
+  else if (sel.face) removeBodies([sel.face.bodyId]);
+  else if (sel.regions.length) removeSketch(sel.regions[0].sketchId);
   else return;
   stopTransform();
+  st.op = null;
+  setPreview(null);
   clearSel();
   commit();
+}
+
+function removeSketch(id) {
+  if (st.sketchId === id) { st.sketchId = null; vp.setWorkPlane(null); }
+  doc.sketches = doc.sketches.filter(s => s.id !== id);
 }
 
 // Rundung/Fase löschen: Kante wird wieder scharf. Kugelecken, die an der Rundung hängen, gehen mit.
@@ -1122,10 +1131,11 @@ function renderBar() {
     if (o.face) {
       sep();
       if (sel.face?.feature) B('Bearbeiten', sel.face.feature.kind === 'chamfer' ? 'chamfer' : 'fillet', () => editFeature(sel.face.bodyId, sel.face.feature.tag));
-      if (sel.face?.feature) B('Löschen', 'trash', deleteSelection, 'danger');
       B('Skizze', 'pencil', () => startDraw('line'));
       B('Körper', 'box', () => { const id = sel.face.bodyId; clearSel(); sel.bodies = [id]; selectionChanged(); });
+      B(sel.face?.feature ? 'Löschen' : 'Körper löschen', 'trash', deleteSelection, 'danger');
     }
+    if ((o.type === 'extrude' || o.type === 'revolve') && o.sketchId && sel.regions.length) B('Skizze löschen', 'trash', deleteSelection, 'danger');
     if (o.type === 'extrude' && o.sketchId) B('Rotation', 'revolve', startRevolve);
     sep();
     B('Abbrechen', 'x', cancelOp, '', true);
@@ -1138,6 +1148,7 @@ function renderBar() {
     else if (x.mode === 'rotate') ['X', 'Y', 'Z'].forEach((a, i) => F(a, 0, '°', v => v && bakeAbout(T.makeRotationAxis(new THREE.Vector3().setComponent(i, 1), THREE.MathUtils.degToRad(v)))));
     else F('Faktor', 1, '', v => v > 0 && v !== 1 && bakeAbout(T.makeScale(v, v, v)));
     sep();
+    if (sel.bodies.length) B('Löschen', 'trash', deleteSelection, 'danger', true);
     B('Fertig', 'check', () => { stopTransform(); sync(); }, 'primary');
   } else if (isDraw(st.tool)) {
     L({ line: 'Linie', rect: 'Rechteck', circle: 'Kreis', arc: 'Bogen' }[st.tool]);
@@ -1171,7 +1182,7 @@ function renderBar() {
     sep();
     B('Körper', 'box', () => { const id = sel.face.bodyId; clearSel(); sel.bodies = [id]; selectionChanged(); });
     if (f) B('Bearbeiten', f.kind === 'chamfer' ? 'chamfer' : 'fillet', () => editFeature(sel.face.bodyId, f.tag));
-    if (f) B('Löschen', 'trash', deleteSelection, 'danger');
+    B(f ? 'Löschen' : 'Körper löschen', 'trash', deleteSelection, 'danger');
   } else if (sel.edges.length) {
     L(sel.edges.length + (sel.edges.length > 1 ? ' Kanten' : ' Kante'));
     L('weitere Kanten dazutippen', true);
@@ -1415,7 +1426,7 @@ function renderPanel() {
     },
     remove(kind, id) {
       if (kind === 'body') removeBodies([id]);
-      else { if (st.sketchId === id) { st.sketchId = null; vp.setWorkPlane(null); } doc.sketches = doc.sketches.filter(s => s.id !== id); }
+      else removeSketch(id);
       st.op = null;
       setPreview(null);
       clearSel();

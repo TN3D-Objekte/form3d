@@ -371,6 +371,26 @@ try {
       `Druckkanten: ${JSON.stringify(op)}, −${dv.toFixed(1)} mm³ (Soll ~31), Überhang ${c.over.toFixed(2)} mm², ${kinds}`);
     doc.bodies = doc.bodies.filter(b => b.id !== id); window.form3d.sync();
   }
+  // Löschen direkt in der Leiste: Körper beim Bewegen, Skizze beim Extrudieren einer Skizzenfläche
+  {
+    const btn = t => [...document.querySelectorAll('#bar .btn')].find(b => b.title === t);
+    const id = 9002;
+    doc.bodies.push({ id, name: 'Löschwürfel', color: '#a9b4c4', visible: true, mesh: K.primitive('box', { l: 10, b: 10, h: 10 }) });
+    sel.bodies = [id]; window.form3d.sync();
+    btn('Bewegen')?.click();
+    const moving = !!st.xf;
+    btn('Löschen')?.click();
+    const bodyGone = !doc.bodies.some(b => b.id === id) && !st.xf;
+    const sid = 9003, rect = [[0, 0], [10, 0], [10, 10], [0, 10]];
+    doc.sketches.push({ id: sid, name: 'Löschskizze', plane: S.BASE_PLANES.xy, visible: true, parent: null, constraints: [],
+      entities: rect.map((a, i) => ({ type: 'line', a, b: rect[(i + 1) % 4], id: sid * 10 + i })) });
+    sel.regions = [{ sketchId: sid, idx: 0 }];
+    st.op = window.form3d.makeExtrude({ title: 'Extrudieren', regions: [{ outer: rect, holes: [] }], plane: S.BASE_PLANES.xy, parentId: null, sketchId: sid, origin: [5, 5, 0] });
+    window.form3d.refresh();
+    btn('Skizze löschen')?.click();
+    const sketchGone = !doc.sketches.some(s => s.id === sid) && !st.op;
+    log(moving && bodyGone && sketchGone, `Löschen in der Leiste: Körper beim Bewegen ${bodyGone ? 'gelöscht' : 'bleibt'}, Skizze aus Flächenauswahl ${sketchGone ? 'gelöscht' : 'bleibt'}`);
+  }
   // Passungen: Spiel 0,3 mm je Seite – Loch (Abzug) größer, Zapfen kleiner; Ecken bleiben spitz
   {
     const sq = [{ outer: [[-5, -5], [5, -5], [5, 5], [-5, 5]], holes: [] }];
