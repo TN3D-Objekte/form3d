@@ -164,6 +164,20 @@ button:disabled { opacity: 0.32; cursor: default; }
 }
 #gridchip b { color: var(--text); font-weight: 650; }
 
+/* ---- Druckprüfung ---- */
+#check {
+  position: fixed; left: 50%; top: calc(var(--top) + 56px); transform: translateX(-50%); z-index: 3;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 20px);
+  background: var(--surface); box-shadow: var(--shadow); border-radius: 18px; padding: 6px 6px 6px 14px;
+  font-size: 13px; font-weight: 600; color: #344054; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+#check .ck { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+#check .dot { width: 10px; height: 10px; border-radius: 50%; }
+#check .ok { color: #079455; }
+#check button { height: 34px; padding: 0 12px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 650; }
+#check button.plain { background: rgba(17, 24, 39, 0.06); color: var(--text); padding: 0 9px; }
+.top-btn.on { background: var(--accent); color: #fff; }
+
 #loading { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: var(--bg); font-weight: 600; color: var(--muted); padding: 24px; text-align: center; }
 
 @media (max-width: 760px) {

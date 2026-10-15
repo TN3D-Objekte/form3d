@@ -28,6 +28,7 @@ const ICONS = {
   layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><rect x="9" y="9" width="6" height="6"/>',
   pencil: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
+  print: '<path d="M7 9V4h10v5"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v6H7z"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.500 9.500a2.500 2.500 0 113.500 2.300c-.7.4-1 .9-1 1.700M12 17v.01"/>',
 };
 
@@ -193,8 +194,10 @@ export function showHelp(device = 'tablet', onDevice) {
         <li><b>Kante antippen</b> – verrunden oder fasen, Maß unten eingeben</li>
         <li><b>Rundung oder Fase antippen</b> – Löschen macht die Kante wieder scharf</li>
         <li><b>Fläche zweimal antippen</b> – ganzen Körper wählen und gleich verschieben/drehen, weitere Körper dazutippen</li>
-        <li>Unten erscheinen Bewegen, Vereinigen, Abziehen, Farbe, Löschen</li>
-        <li>Export als STL/OBJ über das Menü oben links</li></ul></div>
+        <li>Unten erscheinen Bewegen, Vereinigen, Abziehen, Farbe, Löschen</li></ul></div>
+      <div><h3>3D-Druck</h3><ul>
+        <li><b>Druckprüfung</b> (Drucker oben rechts): rot Überhänge über 45°, orange Wände unter 0,8 mm, violett Spalte/Löcher unter 1 mm; <b>Beste Lage</b> legt den Körper mit wenig Überhang auf</li>
+        <li>Menü → <b>An Slicer senden (3MF)</b> öffnet das Teilen-Menü (z. B. Bambu Handy, Prusa); Export auch als 3MF, STL, OBJ</li></ul></div>
       <div><h3>Fehler melden</h3><ul>
         <li>Menü → <b>Fehler aufzeichnen</b>, Fehler nachstellen, <b>Hier!</b> im richtigen Moment, dann <b>Fertig</b></li>
         <li>Die Datei mit kurzer Beschreibung teilen oder sichern und weitergeben</li></ul></div>` }),

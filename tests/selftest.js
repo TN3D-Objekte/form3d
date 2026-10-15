@@ -6,6 +6,7 @@ import { exportSTL, export3MF } from '../js/exporters.js';
 import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains } from '../js/edges.js';
 import { analyze, faceLoops, smoothSurface } from '../js/meshview.js';
 import { solveSketch } from '../js/solver.js';
+import { checkPrint, bestOrientation } from '../js/printcheck.js';
 const { doc, vp, st, sel, railPick, applyOp } = window.form3d;
 const out = document.createElement('pre');
 out.id = 'selftest';
@@ -329,6 +330,21 @@ try {
   fromFile(toFile());
   const after = doc.bodies.map(b => K.props(b.mesh).volume.toFixed(1)).join();
   log(before === after && doc.sketches.length === 2, 'Projektdatei-Rundlauf: ' + after);
+  // Druckprüfung: Überhang, dünne Wand, enger Spalt, beste Lage
+  {
+    const at = (m, x, y, z) => K.transform(m, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1]);
+    const cube = K.primitive('box', { l: 20, b: 20, h: 10 }), c0 = checkPrint(cube);
+    const T = K.boolean('union', K.primitive('box', { l: 10, b: 10, h: 20 }), at(K.primitive('box', { l: 30, b: 10, h: 2 }), 0, 0, 20)), cT = checkPrint(T);
+    const wall = checkPrint(K.primitive('box', { l: 20, b: 0.5, h: 10 }));
+    const slot = checkPrint(K.boolean('union', at(K.primitive('box', { l: 20, b: 5, h: 10 }), 0, -2.75, 0), at(K.primitive('box', { l: 20, b: 5, h: 10 }), 0, 2.75, 0)));
+    const o = bestOrientation(T);
+    log(c0.over === 0 && !c0.thin && !c0.gap && Math.abs(c0.bed - 400) < 0.01 && Math.abs(cT.over - 200) < 0.5 && !cT.thin && wall.thin > 0 && slot.gap > 0 && !slot.thin && o.best.down[2] > 0.99 && o.best.over < 1,
+      `Druckprüfung: Würfel ${c0.over}/${c0.thin}/${c0.gap}, Auflage ${c0.bed.toFixed(0)} mm²; T-Stück Überhang ${cT.over.toFixed(1)} mm² (Soll 200), beste Lage ${JSON.stringify(o.best.down)} mit ${o.best.over.toFixed(1)} mm²; 0,5-mm-Wand ${wall.thin} dünn; 0,5-mm-Spalt ${slot.gap}`);
+    click('#btn-check');
+    const shown = !document.getElementById('check').hidden && [...vp.scene.children].some(g => g.children?.some(x => x.children?.some(m => m.material?.vertexColors)));
+    click('#btn-check');
+    log(shown && document.getElementById('check').hidden, 'Druckprüfung ein/aus: Leiste und Markierung ' + (shown ? 'sichtbar' : 'fehlen'));
+  }
   // 3MF: ZIP-Verzeichnis lesen, Prüfsumme und Modell (Punkte/Dreiecke je Körper) wie ein Slicer prüfen
   {
     const z = export3MF(doc.bodies), dv = new DataView(z.buffer), dec = new TextDecoder(), files = {};

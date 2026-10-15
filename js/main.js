@@ -10,6 +10,7 @@ import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLoc
 import * as UI from './ui.js';
 import { exportSTL, exportOBJ, export3MF, download, share } from './exporters.js';
 import * as Bug from './bugrec.js';
+import { checkPrint, bestOrientation, OVER, THIN, GAP, LIMITS } from './printcheck.js';
 
 const $ = id => document.getElementById(id);
 const V3 = a => new THREE.Vector3(a[0], a[1], a[2]);
@@ -20,7 +21,7 @@ const isDraw = t => DRAW.includes(t);
 
 const vp = new Viewport($('gl'), $('overlay'));
 const sel = { bodies: [], face: null, regions: [], ents: [], edges: [], con: null };
-const st = { tool: 'select', sketchId: null, pickPlane: false, pendingTool: null, xf: null, last: null, refs: [] };
+const st = { tool: 'select', sketchId: null, pickPlane: false, pendingTool: null, xf: null, last: null, refs: [], check: false };
 // Aktiver Vorgang. Wird ein Vorgang mit restore (Rundung/Fase bearbeiten) anders als über Fertig verlassen,
 // stellt restore den vorherigen Körper wieder her.
 let curOp = null;
@@ -66,7 +67,22 @@ function geometryOf(an) {
 const views = new Map(); // bodyId → { meshRef, an, mesh, edges, group }
 function dropView(bv) {
   gBodies.remove(bv.group);
-  for (const o of [bv.mesh, bv.edges]) { o.geometry.dispose(); o.material.dispose(); }
+  for (const o of [bv.mesh, bv.edges, bv.check]) if (o) { o.geometry.dispose(); o.material.dispose(); }
+}
+// Druckprüfung: betroffene Dreiecke farbig über den Körper legen
+const CHECK_COLORS = [[OVER, [0.9, 0.2, 0.2]], [THIN, [0.97, 0.56, 0.1]], [GAP, [0.55, 0.3, 0.85]]];
+function checkOverlay(b, bv) {
+  const r = checkPrint(b.mesh), pos = [], col = [];
+  r.flags.forEach((f, n) => {
+    const c = CHECK_COLORS.find(([bit]) => f & bit);
+    if (!c) return;
+    for (let k = 0; k < 9; k++) pos.push(bv.an.pos[n * 9 + k]);
+    for (let k = 0; k < 3; k++) col.push(...c[1]);
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
 }
 function syncBodies() {
   const seen = new Set();
@@ -90,6 +106,8 @@ function syncBodies() {
       bv = { meshRef: b.mesh, an, mesh, edges, group };
       views.set(b.id, bv);
     }
+    if (st.check && !bv.check) { bv.check = checkOverlay(b, bv); bv.group.add(bv.check); }
+    if (!st.check && bv.check) { bv.group.remove(bv.check); bv.check.geometry.dispose(); bv.check.material.dispose(); bv.check = null; }
     const on = sel.bodies.includes(b.id);
     bv.group.visible = b.visible;
     bv.mesh.material.color.set(b.color);
@@ -201,6 +219,7 @@ function sync() {
   syncBodies();
   syncSketches();
   syncHighlights();
+  renderCheck();
   st.refs = st.sketchId ? refsOnPlane(sketch(st.sketchId).plane) : [];
   if (st.xf) sel.bodies.length ? resetPivot() : stopTransform();
   vp.scene.updateMatrixWorld(true);
@@ -1197,6 +1216,45 @@ function railPick(id) {
   refreshOp();
 }
 
+// Druckprüfung ein/aus und Ergebnis für die gewählten (sonst alle sichtbaren) Körper
+function toggleCheck() {
+  st.check = !st.check;
+  sync();
+}
+function renderCheck() {
+  const el = $('check');
+  $('btn-check')?.classList.toggle('on', st.check);
+  const list = (sel.bodies.length ? sel.bodies.map(body) : doc.bodies.filter(b => b.visible)).filter(Boolean);
+  el.hidden = !st.check;
+  if (!st.check) return;
+  if (!list.length) { el.replaceChildren(UI.h('span', { class: 'ck' }, 'Keine Körper zum Prüfen')); return; }
+  const sum = k => list.reduce((a, b) => a + checkPrint(b.mesh)[k], 0), cm2 = x => UI.fmt(Math.round(x) / 100) + ' cm²';
+  const over = sum('over'), thin = sum('thin'), gap = sum('gap');
+  const item = (color, text) => UI.h('span', { class: 'ck' }, UI.h('span', { class: 'dot', style: 'background:' + color }), text);
+  const kids = [
+    over > 1 ? item('#e53e3e', 'Überhang ' + cm2(over)) : UI.h('span', { class: 'ck ok' }, '✓ keine Überhänge'),
+    thin ? item('#f78e1a', 'dünne Wand (< ' + UI.fmt(LIMITS.wall) + ' mm)') : UI.h('span', { class: 'ck ok' }, '✓ Wände'),
+    gap ? item('#8c4dd9', 'enger Spalt/Loch (< ' + UI.fmt(LIMITS.gap) + ' mm)') : UI.h('span', { class: 'ck ok' }, '✓ Spalte'),
+  ];
+  if (list.length === 1) {
+    const b = list[0], o = bestOrientation(b.mesh);
+    kids.push(UI.h('span', { class: 'ck' }, 'Auflage ' + cm2(o.current.bed)));
+    if (o.best.score < o.current.score * 0.8 - 20) kids.push(UI.h('button', { onclick: () => orientBody(b.id, o.best.down) }, 'Beste Lage: Überhang ' + cm2(o.best.over)));
+  }
+  kids.push(UI.h('button', { class: 'plain', title: 'Druckprüfung beenden', 'aria-label': 'Druckprüfung beenden', onclick: toggleCheck, html: UI.icon('x') }));
+  el.replaceChildren(...kids);
+}
+// Körper so drehen, dass die Richtung down nach unten zeigt, und wieder auf dieselbe Höhe stellen
+function orientBody(id, down) {
+  const b = body(id), box = bboxOf(b.mesh), c = box.getCenter(new THREE.Vector3());
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(...down), new THREE.Vector3(0, 0, -1));
+  const rot = new THREE.Matrix4().makeTranslation(c.x, c.y, c.z).multiply(new THREE.Matrix4().makeRotationFromQuaternion(q)).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+  const m1 = K.transform(b.mesh, rot.elements), lift = box.min.z - bboxOf(m1).min.z;
+  const all = new THREE.Matrix4().makeTranslation(0, 0, lift).multiply(rot);
+  patchBody(id, { mesh: K.transform(b.mesh, all.elements), features: moveFeatures(b, all.elements) });
+  commit();
+}
+
 function renderTop() {
   $('doc-name').textContent = doc.name;
   $('btn-undo').disabled = !canUndo();
@@ -1218,6 +1276,7 @@ function buildTop() {
       B('', '', 'Von vorne', () => vp.setView('front'), 'Vorne'),
       B('', '', 'Von rechts', () => vp.setView('right'), 'Rechts'),
       B('', 'fit', 'Alles einpassen', () => vp.fit(sceneBox())),
+      B('btn-check', 'print', 'Druckprüfung', toggleCheck),
       B('btn-panel', 'layers', 'Elemente', () => { $('panel').classList.toggle('closed'); })));
 }
 
