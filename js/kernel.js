@@ -45,9 +45,10 @@ function crossSection(regions) {
   return cs;
 }
 
-export function extrude(regions, plane, d) {
-  let m = Manifold.extrude(crossSection(regions), Math.abs(d));
-  if (d < 0) m = m.translate([0, 0, d]);
+// over: Überstand an beiden Enden, damit Schnittkörper nicht genau in Körperflächen enden
+export function extrude(regions, plane, d, over = 0) {
+  let m = Manifold.extrude(crossSection(regions), Math.abs(d) + 2 * over);
+  m = m.translate([0, 0, Math.min(d, 0) - over]);
   return toMesh(m.transform(planeMatrix(plane)));
 }
 
@@ -77,9 +78,18 @@ export function boolean(op, a, b) {
 
 export const unionAll = meshes => meshes.reduce((a, b) => boolean('union', a, b));
 
+// Kantenwerkzeug an seinen Ebenen abschneiden (behalten wird n·x ≥ o). Die Schnittfläche soll genau
+// in der Körperfläche liegen; das gilt erst nach dem Runden auf Float32, daher ohne Cache weiterrechnen.
+export function toolMesh(t) {
+  if (!t.trim?.length) return t.mesh;
+  const m = toMesh(t.trim.reduce((a, p) => a.trimByPlane(p.n, p.o), toManifold(t.mesh)));
+  if (m) cache.delete(m);
+  return m;
+}
+
 // Verrundung/Fase: Werkzeuge an konvexen Kanten abziehen, an konkaven anfügen
 export function blend(mesh, tools) {
-  const cut = tools.filter(t => t.convex).map(t => t.mesh), fill = tools.filter(t => !t.convex).map(t => t.mesh);
+  const cut = tools.filter(t => t.convex).map(toolMesh), fill = tools.filter(t => !t.convex).map(toolMesh);
   for (const m of [...cut, ...fill]) if (toManifold(m).isEmpty()) throw new Error('Werkzeugkörper ungültig');
   let r = mesh;
   if (cut.length) r = boolean('subtract', r, unionAll(cut));

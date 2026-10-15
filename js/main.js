@@ -4,7 +4,7 @@ import { Viewport } from './viewport.js';
 import * as K from './kernel.js';
 import * as S from './sketch.js';
 import { analyze, faceTriangles, faceCentroid, faceLoops } from './meshview.js';
-import { edgeChains, buildEdgeTool } from './edges.js';
+import { edgeChains, buildEdgeTool, cornerTools } from './edges.js';
 import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
@@ -260,12 +260,15 @@ function applySolid(tool, mode, parentId, auto) {
 }
 
 // ---------------------------------------------------------------- Operationen (mit Vorschau, bestätigt über „Fertig“)
+// Skizzenebenen auf Körperflächen sind gerundet und weichen um Bruchteile eines µm von der Fläche ab;
+// ohne Überstand bleiben beim Durchschneiden hauchdünne Häute stehen
+const CUT_OVER = 1e-3;
 const resolveMode = o => (o.type === 'edge' ? (o.convex ? 'cut' : 'add') : o.mode !== 'auto' ? o.mode : o.parentId != null && body(o.parentId) ? (o.type === 'extrude' && o.dist < 0 ? 'cut' : 'add') : 'new');
 
 function makeExtrude(p) {
   return {
     type: 'extrude', mode: 'auto', dist: 0, handle: true, ...p,
-    build() { return Math.abs(this.dist) < 1e-6 ? null : K.extrude(this.regions, this.plane, this.dist); },
+    build() { return Math.abs(this.dist) < 1e-6 ? null : K.extrude(this.regions, this.plane, this.dist, resolveMode(this) === 'cut' ? CUT_OVER : 0); },
   };
 }
 function makeRevolve(p) {
@@ -1008,8 +1011,8 @@ function startEdgeOp(kind) {
   const b = body(sel.edges[0].bodyId), all = edgeChains(b.mesh), picked = sel.edges.map(x => all[x.idx]);
   const o = {
     type: 'edge', title: 'Kanten', kind, size: 2, bodyId: b.id, convex: true,
-    tools() { return picked.map(ch => buildEdgeTool(b.mesh, ch, this.kind, this.size)); },
-    build() { const ts = this.tools(); this.convex = ts.some(t => t.convex); return K.unionAll(ts.map(t => t.mesh)); },
+    tools() { return [...picked.map(ch => buildEdgeTool(b.mesh, ch, this.kind, this.size)), ...cornerTools(b.mesh, picked, this.kind, this.size)]; },
+    build() { const ts = this.tools(); this.convex = ts.some(t => t.convex); return K.unionAll(ts.map(K.toolMesh)); },
     result() { return K.blend(b.mesh, this.tools()); },
   };
   stopTransform();

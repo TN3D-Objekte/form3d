@@ -3,7 +3,8 @@ import * as K from '../js/kernel.js';
 import * as S from '../js/sketch.js';
 import { toFile, fromFile } from '../js/doc.js';
 import { exportSTL } from '../js/exporters.js';
-import { edgeChains, buildEdgeTool } from '../js/edges.js';
+import { edgeChains, buildEdgeTool, cornerTools } from '../js/edges.js';
+import { analyze, faceLoops } from '../js/meshview.js';
 import { solveSketch } from '../js/solver.js';
 const { doc, vp, st, sel, railPick, applyOp } = window.form3d;
 const out = document.createElement('pre');
@@ -164,6 +165,30 @@ try {
   const inner = ch => vertical(ch) && Math.abs(ch.pts[0][0] - 20) < 1e-3 && Math.abs(ch.pts[0][1] - 20) < 1e-3;
   const c3 = blendV(ell, inner, 'fillet', 5) - volOf(ell);
   log(Math.abs(c3 - 53.65) < 1.5, `Verrundung R5 an Innenkante: +${c3.toFixed(1)} (Soll ~53.7)`);
+
+  // Verschobene Körper: Werkzeugenden/Schnittkörper liegen nicht exakt in den Körperflächen –
+  // es dürfen keine hauchdünnen Reste (Faltkanten, zusätzliche Flächen, Häute) stehen bleiben
+  const shift = m => K.transform(m, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.123456, 0.654321, 0.333333, 1]);
+  const realFaces = m => { const an = analyze(m); return an.faces.filter(f => f.tris.some(t => an.fa[t] > 1e-9)).length; };
+  const bxs = shift(bx), chamf = K.blend(bxs, edgeChains(bxs).filter(vertical).slice(0, 1).map(ch => buildEdgeTool(bxs, ch, 'chamfer', 4)));
+  log(realFaces(chamf) === 7 && edgeChains(chamf).length === 15, `Fase an verschobenem Quader: ${realFaces(chamf)} Flächen (Soll 7), ${edgeChains(chamf).length} Kanten (Soll 15)`);
+  const ells = shift(ell), ellIn = edgeChains(ells).filter(ch => vertical(ch) && Math.abs(ch.pts[0][0] - 20.123456) < 1e-3 && Math.abs(ch.pts[0][1] - 20.654321) < 1e-3);
+  const ellF = K.blend(ells, ellIn.map(ch => buildEdgeTool(ells, ch, 'chamfer', 5)));
+  log(ellIn.length === 1 && realFaces(ellF) <= realFaces(ell) + 1 + 4, `Fase an Innenkante, verschoben: ${realFaces(ellF)} Flächen (Soll ≤ ${realFaces(ell) + 5})`);
+  // Eckübergänge: alle Kanten verrundet → keine scharfen Kanten, Volumen wie gerundeter Quader
+  const rbox = (l, b, h, r) => (l - 2 * r) * (b - 2 * r) * (h - 2 * r) + 2 * r * ((l - 2 * r) * (b - 2 * r) + (l - 2 * r) * (h - 2 * r) + (b - 2 * r) * (h - 2 * r)) + Math.PI * r * r * (l + b + h - 6 * r) + 4 / 3 * Math.PI * r ** 3;
+  const filletAll = (m, pick, r) => { const ch = edgeChains(m).filter(pick); return K.blend(m, [...ch.map(c => buildEdgeTool(m, c, 'fillet', r)), ...cornerTools(m, ch, 'fillet', r)]); };
+  const rb = filletAll(shift(bx), () => true, 5), vRb = volOf(rb);
+  log(analyze(rb).sharp.length === 0 && Math.abs(vRb - rbox(50, 50, 30, 5)) < 0.002 * vRb, `Alle 12 Kanten R5 mit Kugelecken: ${analyze(rb).sharp.length / 2} scharfe Kanten, V ${vRb.toFixed(0)} (Soll ${rbox(50, 50, 30, 5).toFixed(0)})`);
+  const pocket = K.boolean('subtract', K.primitive('box', { l: 60, b: 50, h: 30 }), K.extrude([{ outer: [[-20, -15], [20, -15], [20, 15], [-20, 15]], holes: [] }], { ...S.BASE_PLANES.xy, o: [0, 0, 10] }, 25));
+  const pIn = ch => ch.pts.every(p => Math.abs(p[0]) < 20.01 && Math.abs(p[1]) < 15.01 && p[2] > 9.99) && !ch.pts.every(p => p[2] > 29.99);
+  const vPk = volOf(filletAll(pocket, pIn, 4)), wantPk = 90000 - rbox(40, 30, 40, 4) / 2;
+  log(Math.abs(vPk - wantPk) < 0.002 * wantPk, `Tasche, Innenecken R4: V ${vPk.toFixed(0)} (Soll ${wantPk.toFixed(0)})`);
+  const genus = m => (2 - new Set(m.t).size + m.t.length / 6) / 2;
+  const cub = shift(K.primitive('box', { l: 50, b: 50, h: 50 })), topF = analyze(cub).faces.findIndex(f => f.n[2] > 0.999);
+  const { plane: tp, loops: tLoops } = faceLoops(cub, analyze(cub), topF);
+  const hole = K.boolean('subtract', cub, K.extrude(S.computeRegions([{ type: 'circle', c: S.regionCenter({ outer: tLoops[0], holes: [] }), r: 10 }]), tp, -50, 1e-3));
+  log(genus(hole) === 1, `Durchgangsloch in verschobenem Würfel: Geschlecht ${genus(hole)} (Soll 1, keine Haut)`);
 
   // Rotation: Rechteck x 10..20, y 0..10 um die Y-Achse
   const ring = K.revolve([{ outer: [[10, 0], [20, 0], [20, 10], [10, 10]], holes: [] }], S.BASE_PLANES.xz, { p: [0, 0], d: [0, 1] }, 360);

@@ -21,18 +21,27 @@ export function analyze(mesh) {
   }
   const fdot = (i, j) => fn[3 * i] * fn[3 * j] + fn[3 * i + 1] * fn[3 * j + 1] + fn[3 * i + 2] * fn[3 * j + 2];
 
+  // Ecken an gleicher Position zusammenfassen: Boolesche Ergebnisse enthalten entartete Dreiecke
+  // mit doppelten Punkten, die sonst die Nachbarschaft der echten Dreiecke unterbrechen
+  const weld = new Int32Array(nV), at = new Map();
+  for (let i = 0; i < nV; i++) {
+    const k = v[3 * i] + ',' + v[3 * i + 1] + ',' + v[3 * i + 2], w = at.get(k);
+    if (w === undefined) at.set(k, i);
+    weld[i] = w ?? i;
+  }
+
   // koplanare Nachbardreiecke zu Flächen zusammenfassen, scharfe Kanten sammeln
   const par = new Int32Array(nT);
   for (let i = 0; i < nT; i++) par[i] = i;
   const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
   const open = new Map(), sharp = [], sharpTri = [];
   for (let i = 0; i < nT; i++) for (let e = 0; e < 3; e++) {
-    const a = t[3 * i + e], b = t[3 * i + (e + 1) % 3];
+    if (!fa[i]) break;
+    const a = weld[t[3 * i + e]], b = weld[t[3 * i + (e + 1) % 3]];
     const key = a < b ? a * nV + b : b * nV + a;
     const j = open.get(key);
     if (j === undefined) { open.set(key, i); continue; }
     open.delete(key);
-    if (!fa[i] || !fa[j]) continue;
     const d = fdot(i, j);
     if (d > 0.99999) par[find(i)] = find(j);
     else if (d < COS_EDGE) { sharp.push(a, b); sharpTri.push(i, j); } // Dreieck i enthält die Halbkante a→b
@@ -74,7 +83,7 @@ export function analyze(mesh) {
   for (let k = 0; k < sharp.length; k++) edges.set(v.subarray(sharp[k] * 3, sharp[k] * 3 + 3), k * 3);
   const corners = [...cornerSet].map(i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]]);
 
-  an = { pos, nor, edges, triFace, faces, corners, fa, fn, sharp, sharpTri };
+  an = { pos, nor, edges, triFace, faces, corners, fa, fn, sharp, sharpTri, weld };
   cacheMap.set(mesh, an);
   return an;
 }
@@ -101,7 +110,8 @@ export function faceCentroid(an, fi) {
 export function faceLoops(mesh, an, fi) {
   const { v, t } = mesh, nV = v.length / 3, f = an.faces[fi];
   const set = new Set();
-  for (const ti of f.tris) for (let e = 0; e < 3; e++) set.add(t[3 * ti + e] * nV + t[3 * ti + (e + 1) % 3]);
+  const w = an.weld;
+  for (const ti of f.tris) for (let e = 0; e < 3; e++) set.add(w[t[3 * ti + e]] * nV + w[t[3 * ti + (e + 1) % 3]]);
   const next = new Map();
   for (const key of set) {
     const a = Math.floor(key / nV), b = key % nV;
