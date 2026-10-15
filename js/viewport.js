@@ -220,14 +220,27 @@ export class Viewport {
       v.target.add(g).sub(this.viewPlanePoint(x, y));
       this.requestRender();
     };
-    const mid = () => { const [a, b] = touches(); return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) || 1 }; };
+    const mid = () => { const [a, b] = touches(); return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) || 1, a: Math.atan2(b.y - a.y, b.x - a.x) }; };
+    // Zwei Finger umeinander drehen = Ansicht um die senkrechte Achse drehen (Drehteller). Erst ab TWIST
+    // Gesamtwinkel, damit Spreizen und Verschieben nicht nebenbei drehen; danach ohne Sprung.
+    const TWIST = 0.15;
+    const twist = m => {
+      let da = m.a - pinch.a;
+      da = ((da + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+      pinch.a = m.a;
+      const before = pinch.tw;
+      pinch.tw += da;
+      const eff = x => Math.sign(x) * Math.max(0, Math.abs(x) - TWIST);
+      const d = eff(pinch.tw) - eff(before);
+      if (d) v.theta += d * (Math.cos(v.phi) >= 0 ? 1 : -1);
+    };
     const centroid = () => { const t = touches(); return { x: t.reduce((s, p) => s + p.x, 0) / t.length, y: t.reduce((s, p) => s + p.y, 0) / t.length }; };
     // Mehrfinger-Geste (neu) beginnen – auch wenn Finger dazukommen oder abheben, damit nichts springt
     const startGesture = () => {
       if (this.twoFinger && touches().length >= 3) { mode = 'pan'; const c = centroid(); grab = this.viewPlanePoint(c.x, c.y); return; }
       mode = 'pinch';
       const m = mid();
-      pinch = { d: m.d, dist: v.dist, x: m.x, y: m.y };
+      pinch = { d: m.d, dist: v.dist, x: m.x, y: m.y, a: m.a, tw: 0 };
       grab = this.twoFinger ? null : this.viewPlanePoint(m.x, m.y);
     };
 
@@ -259,7 +272,8 @@ export class Viewport {
       if (mode === 'pinch') {
         if (p.type !== 'touch' || touches().length < 2) return;
         const m = mid();
-        if (!this.twoFinger) return zoomAt(m.x, m.y, pinch.dist * pinch.d / m.d);
+        twist(m);
+        if (!this.twoFinger) { this.applyView(); return zoomAt(m.x, m.y, pinch.dist * pinch.d / m.d); }
         // zwei Finger gemeinsam ziehen = drehen, spreizen = zoomen zur Fingermitte
         v.theta -= (m.x - pinch.x) * 0.008;
         v.phi = clamp(v.phi - (m.y - pinch.y) * 0.008, 0.001, Math.PI - 0.001);

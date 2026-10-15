@@ -159,9 +159,9 @@ export function toast(msg, ms = 2600) {
 
 const NAV = {
   tablet: `<li><b>1 Finger ziehen</b> – Ansicht drehen</li>
-        <li><b>2 Finger</b> – verschieben und zoomen</li>
+        <li><b>2 Finger</b> – verschieben und zoomen, <b>umeinander drehen</b> – Modell rundum drehen</li>
         <li>Sobald der <b>Apple Pencil</b> benutzt wurde, zeichnet nur noch der Stift; Finger navigieren</li>`,
-  phone: `<li><b>2 Finger ziehen</b> – Ansicht drehen, <b>spreizen</b> – zoomen</li>
+  phone: `<li><b>2 Finger ziehen</b> – Ansicht drehen, <b>spreizen</b> – zoomen, <b>umeinander drehen</b> – Modell rundum drehen</li>
         <li><b>3 Finger</b> – verschieben</li>
         <li><b>1 Finger</b> – nur tippen und zeichnen</li>`,
   pc: `<li><b>Linke Maustaste</b> – wählen und zeichnen; auf freier Fläche ziehen dreht</li>

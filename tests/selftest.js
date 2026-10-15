@@ -363,6 +363,27 @@ try {
   const th1 = vp.view.theta;
   dragTo(200, 500, 320, 520, T);
   log(vp.view.theta === th1, '1 Finger im Auswahlmodus dreht nicht');
+
+  // Zwei Finger umeinander drehen: Modell dreht sich mit den Fingern (Drehteller), Abstand bleibt;
+  // kleines Verdrehen beim Zoomen dreht nicht. Im Handy- und im Tablet-Modus.
+  const twistBy = (ang, id0) => {
+    const cx = vp.w / 2, cy = vp.h / 2, R = 90, at = (a, s) => [cx + s * R * Math.cos(a), cy + s * R * Math.sin(a)];
+    fire('pointerdown', ...at(0, -1), T2(id0)); fire('pointerdown', ...at(0, 1), T2(id0 + 1));
+    for (let i = 1; i <= 12; i++) { const a = ang * i / 12; fire('pointermove', ...at(a, -1), T2(id0)); fire('pointermove', ...at(a, 1), T2(id0 + 1)); }
+    fire('pointerup', ...at(ang, -1), T2(id0)); fire('pointerup', ...at(ang, 1), T2(id0 + 1));
+  };
+  for (const phone of [true, false]) {
+    vp.twoFinger = phone;
+    Object.assign(vp.view, { theta: -Math.PI / 4, phi: 0.9, dist: 200 }); vp.view.target.set(0, 0, 0); vp.render();
+    const scrAng = () => { const p = scr(40, 0, 0), o = scr(0, 0, 0); return Math.atan2(p[1] - o[1], p[0] - o[0]); };
+    const a0 = scrAng(), d0 = vp.view.dist, th = vp.view.theta;
+    twistBy(0.08, 920 + (phone ? 0 : 10));
+    const still = vp.view.theta === th;
+    twistBy(Math.PI / 3, 940 + (phone ? 0 : 10));
+    let da = scrAng() - a0; da = Math.atan2(Math.sin(da), Math.cos(da));
+    log(still && da > 0.4 && Math.abs(vp.view.dist - d0) < 0.05 * d0,
+      `${phone ? 'Handy' : 'Tablet'}: 2 Finger 60° im Uhrzeigersinn gedreht → Modell ${(da * 180 / Math.PI).toFixed(0)}° mitgedreht, Abstand ${(vp.view.dist / d0).toFixed(2)}, kleines Verdrehen ${still ? 'ignoriert' : 'dreht!'}`);
+  }
   vp.twoFinger = false;
   out.textContent += 'DONE\n';
 } catch (e) {
