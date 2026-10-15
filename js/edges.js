@@ -174,10 +174,9 @@ function edgeTool(mesh, chain, kind, size, grow) {
     const near = [chain.closed ? (i - 1 + m) % m : i - 1, i < m ? i : -1].filter(k => k >= 0);
     const sum = f => norm(near.map(f).reduce((a, b) => add(a, b)));
     const tau = sum(k => dirs[k]), N1 = sum(k => nrm(segs[k].t1)), N2 = sum(k => nrm(segs[k].t2));
-    const t1 = norm(cross(N1, tau)), t2 = norm(cross(tau, N2)); // in den Flächen, von der Kante weg
     const p = i < m ? P(segs[i].u) : P(segs[m - 1].v);
-    const alpha = Math.acos(Math.max(-1, Math.min(1, dot(t1, t2))));
-    const d = kind === 'fillet' ? size / Math.tan(alpha / 2) : size;
+    const pr = profile(p, tau, N1, N2, kind, size, sgn, grow, nArc), { t1, t2, d } = pr;
+    nArc = pr.nArc;
     if (near.length === 2) { // Krümmung der Kante: Werkzeug darf auf der Innenseite nicht überschlagen (Radius gleich dem Kantenradius geht: Kugelecke)
       // Boolesche Ergebnisse zerteilen Kanten oft in winzige Stücke (z. B. an einer Fase), auf die sich dann
       // der ganze Knick einer Polygonecke drängt. Solche Splitter werden mit dem nächsten langen Stück
@@ -199,22 +198,7 @@ function edgeTool(mesh, chain, kind, size, grow) {
       const k = Math.hypot(...kv) / (la + lb - (sl(a) + sl(b)) / 2);
       if (k > 1e-9 && [t1, t2].some(tt => dot(tt, norm(kv)) > 0.5) && d > 1.001 / k) throw new Error('Radius zu groß für diese Kante');
     }
-    const A = add(p, t1, d), B = add(p, t2, d);
-    const Q = add(p, add(N1, N2), sgn * EPS / Math.max(0.2, 1 + dot(N1, N2)));
-    const ring = [A, add(A, N1, sgn * EPS), Q, add(B, N2, sgn * EPS), B];
-    let toward = () => norm(add(N1, N2)).map(c => -sgn * c);
-    if (kind === 'fillet') {
-      const C = add(p, norm(add(t1, t2)), size / Math.sin(alpha / 2));
-      const eA = norm(sub(A, C)), eB = norm(sub(B, C)), phi = Math.acos(Math.max(-1, Math.min(1, dot(eA, eB))));
-      nArc ||= Math.max(3, Math.round(phi / (Math.PI / 24)));
-      for (let j = 1; j < nArc; j++) {
-        const s = j / nArc, wa = Math.sin(s * phi) / Math.sin(phi), wb = Math.sin((1 - s) * phi) / Math.sin(phi);
-        ring.push(add(C, add([eA[0] * wa, eA[1] * wa, eA[2] * wa], eB, wb), size));
-      }
-      toward = q => norm(sub(C, q));
-    }
-    if (grow) for (const j of [0, 4, ...ring.keys()].filter((j, k, a) => (j === 0 || j >= 4) && a.indexOf(j) === k)) ring[j] = add(ring[j], toward(ring[j]), grow);
-    rings.push(ring);
+    rings.push(pr.ring);
   }
 
   // Offene Enden dürfen nicht genau in der Endfläche des Körpers liegen, sonst bleiben hauchdünne
@@ -239,14 +223,34 @@ function edgeTool(mesh, chain, kind, size, grow) {
       const R = Math.max(...ring.map(q => Math.hypot(...sub(q, p))));
       const len = c => { const cc = Math.max(c, 0.3); return R * (0.25 + Math.sqrt(1 - cc * cc) / cc); };
       const c = convex ? lo : -hi;
-      if (c >= 0.05) return len(c);
+      if (c >= 0.05) {
+        // Die Verlängerung bleibt nur hinter (beim Abziehen: vor) der Endfläche, wenn das Profil nicht seitlich
+        // über sie hinausragt. An stumpfen Ecken tut es das: Dann endet das Werkzeug an der Gehrung zwischen
+        // der anderen Fläche der Kante und der Endfläche (knapp darüber hinaus, damit sich die Werkzeuge überlappen).
+        if (ends.length === 1) {
+          const ne = ends[0];
+          for (const [nk, nj] of [[n1, n2], [n2, n1]]) {
+            let tk = norm(cross(nk, out));
+            if (dot(tk, nj) * sgn > 0) tk = tk.map(x => -x); // in der Fläche von der Kante weg
+            if (-sgn * dot(ne, tk) <= 0.05 || dot(ne, nj) > 0.98) continue; // tangential anschließend: keine Ecke
+            const keep = norm(sub(ne, nj).map(x => -sgn * x)), o = dot(keep, p) - 0.01;
+            if (chain.pts.some(q => dot(keep, q) < o - 1e-6)) break;
+            trim.push({ n: keep, o });
+            break;
+          }
+        }
+        return len(c);
+      }
       // genau eine Endfläche: Seite der Kante behalten
       const ne = ends[0], ce = ends.length === 1 ? dot(ne, out) : 0;
       if (Math.abs(ce) < 0.1) return -GAP;
-      const keep = ce > 0 ? ne.map(x => -x) : ne, o = dot(keep, p);
+      // Steht die Endfläche schräg (z. B. spitze Zunge), bliebe zwischen ihrer Ebene und der Ecke ein dünner
+      // Keil des Werkzeugs stehen – beim Anfügen frei in der Luft, beim Abziehen als Schlitz im Material.
+      // Dann endet das Werkzeug genau im Querschnitt an der Ecke.
+      const flat = Math.abs(ce) > 0.99, keep = flat ? (ce > 0 ? ne.map(x => -x) : ne) : out.map(x => -x), o = dot(keep, p);
       if (chain.pts.some(q => dot(keep, q) < o - 1e-6)) return -GAP;
       trim.push({ n: keep, o });
-      return len(Math.abs(ce));
+      return len(flat ? Math.abs(ce) : 1);
     };
     const e0 = endExt(segs[0].u, dirs[0].map(x => -x), segs[0]), e1 = endExt(segs[m - 1].v, dirs[m - 1], segs[m - 1]);
     if (e0 > 0) rings.unshift(rings[0].map(q => add(q, dirs[0], -e0)));
@@ -255,9 +259,40 @@ function edgeTool(mesh, chain, kind, size, grow) {
     else rings[rings.length - 1] = rings[rings.length - 1].map(q => add(q, dirs[m - 1], -GAP));
   }
 
+  return { convex, mesh: tube(rings, chain.closed), trim };
+}
+
+// Profil des Werkzeugs an Kantenpunkt p (Richtung tau, Flächennormalen N1, N2): A und B in den Flächen im
+// Abstand d von der Kante, dazwischen außen die Ecke Q, innen der Rundungsbogen von B nach A (nArc Stücke;
+// 0 = selbst wählen). grow: siehe edgeTool.
+function profile(p, tau, N1, N2, kind, size, sgn, grow, nArc = 0) {
+  const t1 = norm(cross(N1, tau)), t2 = norm(cross(tau, N2)); // in den Flächen, von der Kante weg
+  const alpha = Math.acos(Math.max(-1, Math.min(1, dot(t1, t2))));
+  const d = kind === 'fillet' ? size / Math.tan(alpha / 2) : size;
+  const A = add(p, t1, d), B = add(p, t2, d);
+  const Q = add(p, add(N1, N2), sgn * EPS / Math.max(0.2, 1 + dot(N1, N2)));
+  const ring = [A, add(A, N1, sgn * EPS), Q, add(B, N2, sgn * EPS), B];
+  let toward = () => norm(add(N1, N2)).map(c => -sgn * c);
+  if (kind === 'fillet') {
+    const C = add(p, norm(add(t1, t2)), size / Math.sin(alpha / 2));
+    const eA = norm(sub(A, C)), eB = norm(sub(B, C)), phi = Math.acos(Math.max(-1, Math.min(1, dot(eA, eB))));
+    nArc ||= Math.max(3, Math.round(phi / (Math.PI / 24)));
+    for (let j = 1; j < nArc; j++) {
+      const s = j / nArc, wa = Math.sin(s * phi) / Math.sin(phi), wb = Math.sin((1 - s) * phi) / Math.sin(phi);
+      ring.push(add(C, add([eA[0] * wa, eA[1] * wa, eA[2] * wa], eB, wb), size));
+    }
+    toward = q => norm(sub(C, q));
+  }
+  if (grow) for (const j of [0, 4, ...ring.keys()].filter((j, k, a) => (j === 0 || j >= 4) && a.indexOf(j) === k)) ring[j] = add(ring[j], toward(ring[j]), grow);
+  return { ring, nArc, t1, t2, d };
+}
+
+// Röhre durch die Profile rings (offen: mit Deckeln), nach außen orientiert. mesh.f markiert die
+// Dreiecke der Rundungs-/Fasenfläche.
+function tube(rings, closed) {
   const R = rings.length, N = rings[0].length, verts = new Float32Array(R * N * 3), tris = [];
   rings.forEach((r, k) => r.forEach((q, j) => verts.set(q, (k * N + j) * 3)));
-  const spans = chain.closed ? R : R - 1;
+  const spans = closed ? R : R - 1;
   const surf = []; // 1 = Dreieck der Rundungs-/Fasenfläche (Profil von B über den Bogen nach A)
   for (let k = 0; k < spans; k++) {
     const a = k * N, b = ((k + 1) % R) * N;
@@ -267,7 +302,7 @@ function edgeTool(mesh, chain, kind, size, grow) {
       surf.push(+(j >= 4), +(j >= 4));
     }
   }
-  if (!chain.closed) {
+  if (!closed) {
     const e = (R - 1) * N;
     for (let i = 1; i < N - 1; i++) { // Deckel als Fächer von der Außenecke Q (Index 2)
       const j = (2 + i) % N, j2 = (3 + i) % N;
@@ -283,7 +318,7 @@ function edgeTool(mesh, chain, kind, size, grow) {
          + verts[a + 2] * (verts[b] * verts[c + 1] - verts[b + 1] * verts[c]);
   }
   if (vol < 0) for (let i = 0; i < tris.length; i += 3) { const x = tris[i + 1]; tris[i + 1] = tris[i + 2]; tris[i + 2] = x; }
-  return { convex, mesh: { v: verts, t: new Uint32Array(tris), f: new Uint32Array(surf) }, trim };
+  return { v: verts, t: new Uint32Array(tris), f: new Uint32Array(surf) };
 }
 
 // Eckübergang: Laufen drei verrundete Kanten in einer Ecke zusammen, schneiden sich die Kantenwerkzeuge
@@ -291,7 +326,6 @@ function edgeTool(mesh, chain, kind, size, grow) {
 // Werkzeug = Kegel vom Kugelmittelpunkt zur Ecke abzüglich Kugel. Die Kugel ist um GAP größer, damit
 // sie die Zylinderflächen der Kantenwerkzeuge schneidet statt sie nur zu berühren.
 export function cornerTools(mesh, chains, kind, size) {
-  if (kind !== 'fillet') return [];
   const { fn } = analyze(mesh), v = mesh.v;
   const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
   const nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
@@ -299,14 +333,18 @@ export function cornerTools(mesh, chains, kind, size) {
   chains.forEach((ch, ci) => {
     if (ch.closed) return;
     const convex = isConvex(mesh, ch), f = ch.segs[0], l = ch.segs[ch.segs.length - 1];
-    for (const [vi, s] of [[f.u, f], [l.v, l]]) {
+    for (const [vi, s, out] of [[f.u, f, norm(sub(P(f.u), P(f.v)))], [l.v, l, norm(sub(P(l.v), P(l.u)))]]) {
       if (!ends.has(vi)) ends.set(vi, []);
-      ends.get(vi).push({ convex, ci, normals: [nrm(s.t1), nrm(s.t2)] });
+      ends.get(vi).push({ convex, ci, out, normals: [nrm(s.t1), nrm(s.t2)] });
     }
   });
   const tools = [];
   for (const [vi, list] of ends) {
-    if (list.length !== 3 || list.some(e => e.convex !== list[0].convex)) continue;
+    if (list.length === 2 && !list[0].convex && !list[1].convex) {
+      const w = wrapTool(P(vi), list, kind, size);
+      if (w) tools.push(w);
+    }
+    if (kind !== 'fillet' || list.length !== 3 || list.some(e => e.convex !== list[0].convex)) continue;
     const ns = [];
     for (const e of list) for (const n of e.normals) if (!ns.some(m => dot(m, n) > 0.999)) ns.push(n);
     if (ns.length !== 3) continue;
@@ -324,6 +362,37 @@ export function cornerTools(mesh, chains, kind, size) {
     tools.push({ convex: sgn > 0, mesh: cornerMesh(C, d, size + GAP, n, ext), heal: cornerMesh(C, d, size + GAP - GROW, n, ext), chains: list.map(e => e.ci) });
   }
   return tools;
+}
+
+// Zwei Innenrundungen (gemeinsame Bodenfläche) enden an einer nach außen stehenden, nicht verrundeten Kante,
+// z. B. an der Spitze einer Zunge in einer Tasche. Wie eine rollende Kugel läuft die Rundung um diese Kante
+// herum: Das Profil am Ende der einen Rundung wird um die Kante zum Profil der anderen gedreht.
+function wrapTool(p, [ea, eb], kind, size) {
+  const floor = ea.normals.find(n => eb.normals.some(m => dot(m, n) > 0.999));
+  if (!floor) return null;
+  const side = e => {
+    const wall = e.normals.find(n => dot(n, floor) <= 0.999);
+    let u = norm(cross(floor, e.out));
+    if (dot(u, wall) < 0) u = u.map(x => -x); // auf dem Boden von der Kante weg
+    return { wall, u, tau: dot(cross(floor, e.out), u) > 0 ? e.out : e.out.map(x => -x) };
+  };
+  const A = side(ea), B = side(eb);
+  if (!A.wall || !B.wall || dot(B.u, ea.out) < 0.05 || dot(A.u, eb.out) < 0.05) return null;
+  const phi = Math.acos(Math.max(-1, Math.min(1, dot(A.u, B.u))));
+  const ax = norm(cross(A.u, ea.out)), rot = (q, th) => {
+    const r = sub(q, p), c = Math.cos(th), s = Math.sin(th);
+    return add(p, add(add(r.map(x => x * c), cross(ax, r), s), ax, dot(ax, r) * (1 - c)));
+  };
+  // etwas über beide Enden hinaus, damit sich das Stück mit den Kantenwerkzeugen überlappt
+  const delta = 0.05, K = Math.max(2, Math.ceil((phi + 2 * delta) / (Math.PI / 24)));
+  const rings = grow => {
+    const pa = profile(p, A.tau, floor, A.wall, kind, size, -1, grow), pb = profile(p, B.tau, floor, B.wall, kind, size, -1, grow, pa.nArc);
+    return Array.from({ length: K + 1 }, (_, k) => {
+      const th = -delta + (phi + 2 * delta) * k / K, s = Math.max(0, Math.min(1, th / phi));
+      return pa.ring.map((q, j) => { const qa = rot(q, th), qb = rot(pb.ring[j], th - phi); return add(qa.map(x => x * (1 - s)), qb, s); });
+    });
+  };
+  return { convex: false, mesh: tube(rings(0), false), heal: tube(rings(GROW), false), chains: [ea.ci, eb.ci] };
 }
 
 // Spat C + Σ a_i d_i (0 ≤ a_i ≤ ext_i) abzüglich Kugel um C

@@ -219,6 +219,23 @@ try {
   const pIn = ch => ch.pts.every(p => Math.abs(p[0]) < 20.01 && Math.abs(p[1]) < 15.01 && p[2] > 9.99) && !ch.pts.every(p => p[2] > 29.99);
   const vPk = volOf(filletAll(pocket, pIn, 4)), wantPk = 90000 - rbox(40, 30, 40, 4) / 2;
   log(Math.abs(vPk - wantPk) < 0.002 * wantPk, `Tasche, Innenecken R4: V ${vPk.toFixed(0)} (Soll ${wantPk.toFixed(0)})`);
+  // Tasche mit spitzer Zunge (16°) und stumpfer Innenecke: Bodenrundungen R2 dürfen nirgends weiter als R
+  // von einer Wand in die Tasche ragen (keine Finnen); an der Zungenspitze läuft die Rundung herum
+  {
+    const poly = [[-1, 1], [10, -5], [20, 10], [-10, 20], [-20, -20], [5, -30], [0, 0]];
+    const tz = K.boolean('subtract', K.primitive('box', { l: 70, b: 70, h: 30 }), K.extrude([{ outer: poly, holes: [] }], { ...S.BASE_PLANES.xy, o: [0, 0, 10] }, 25));
+    const fl = filletAll(tz, ch => ch.pts.every(p => Math.abs(p[2] - 10) < 1e-3), 2);
+    const segD = (q, a, b) => { const ab = [b[0] - a[0], b[1] - a[1]], u = Math.max(0, Math.min(1, ((q[0] - a[0]) * ab[0] + (q[1] - a[1]) * ab[1]) / (ab[0] ** 2 + ab[1] ** 2))); return Math.hypot(q[0] - a[0] - u * ab[0], q[1] - a[1] - u * ab[1]); };
+    let far = 0, tip = 0;
+    for (let i = 0; i < fl.v.length; i += 3) {
+      const q = [fl.v[i], fl.v[i + 1]], z = fl.v[i + 2];
+      if (z < 10.01 || z > 12.5 || Math.abs(q[0]) > 34 || Math.abs(q[1]) > 34) continue;
+      const dist = Math.min(...poly.map((a, k) => segD(q, a, poly[(k + 1) % poly.length])));
+      far = Math.max(far, dist);
+      if (Math.hypot(q[0] + 1, q[1] - 1) < 2.1 && -0.8 * (q[0] + 1) + 0.6 * (q[1] - 1) > 0.8) tip++; // vor der Spitze bei (-1, 1)
+    }
+    log(far < 2.05 && tip > 0, `Spitze Zunge, Bodenrundung R2: max. Abstand zur Wand ${far.toFixed(2)} mm (Soll ≤ 2), Rundung um die Spitze: ${tip} Punkte`);
+  }
   // Nach Verrundung der Oberkante wählt Antippen der senkrechten Kante nur diese (nicht den Bogen dahinter)
   const tf = K.blend(bx, edgeChains(bx).filter(ch => !vertical(ch) && ch.pts.every(p => p[2] > 29.9 && p[1] < -24.9)).map(ch => buildEdgeTool(bx, ch, 'fillet', 2)));
   const vc = edgeChains(tf).filter(ch => vertical(ch) && ch.pts.some(p => Math.abs(p[0] - 25) < 1e-3 && Math.abs(p[1] + 25) < 1e-3 && p[2] < 1));
