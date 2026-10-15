@@ -4,7 +4,7 @@ import { Viewport } from './viewport.js';
 import * as K from './kernel.js';
 import * as S from './sketch.js';
 import { analyze, faceTriangles, faceCentroid, faceLoops, smoothSurface } from './meshview.js';
-import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains } from './edges.js';
+import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains, restoredChains } from './edges.js';
 import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
@@ -20,7 +20,15 @@ const isDraw = t => DRAW.includes(t);
 
 const vp = new Viewport($('gl'), $('overlay'));
 const sel = { bodies: [], face: null, regions: [], ents: [], edges: [], con: null };
-const st = { tool: 'select', sketchId: null, pickPlane: false, pendingTool: null, op: null, xf: null, last: null, refs: [] };
+const st = { tool: 'select', sketchId: null, pickPlane: false, pendingTool: null, xf: null, last: null, refs: [] };
+// Aktiver Vorgang. Wird ein Vorgang mit restore (Rundung/Fase bearbeiten) anders als über Fertig verlassen,
+// stellt restore den vorherigen Körper wieder her.
+let curOp = null;
+Object.defineProperty(st, 'op', {
+  enumerable: true,
+  get: () => curOp,
+  set(o) { const prev = curOp; curOp = o; if (prev !== o && prev?.restore) prev.restore(); },
+});
 
 const body = id => doc.bodies.find(b => b.id === id);
 const sketch = id => doc.sketches.find(s => s.id === id);
@@ -362,6 +370,7 @@ function applyOp() {
       const r = o.result();
       if (!r.mesh) throw new Error('leeres Ergebnis');
       patchBody(o.bodyId, { mesh: r.mesh, features: [...(body(o.bodyId).features || []), ...r.features] });
+      o.restore = null;
     } catch (e) {
       console.error(e);
       return UI.toast(/Radius zu groß/.test(e.message) ? 'Radius zu groß für diese Kante – kleineren Wert versuchen' : 'Mit diesem Maß nicht möglich – kleineren Wert versuchen');
@@ -539,16 +548,43 @@ function deleteSelection() {
 }
 
 // Rundung/Fase löschen: Kante wird wieder scharf. Kugelecken, die an der Rundung hängen, gehen mit.
+function unblendTag(b, tag) {
+  const del = (b.features || []).filter(f => f.tag === tag || f.links?.includes(tag));
+  try { return { del, ...K.unblendFeatures(b.mesh, del, b.features.filter(f => !del.includes(f)), b.features) }; } catch (e) { console.error(e); }
+  return { del };
+}
 function deleteFeature(bodyId, tag) {
-  const b = body(bodyId), del = (b.features || []).filter(f => f.tag === tag || f.links?.includes(tag));
-  let m = null, keep = null;
-  try { ({ mesh: m, keep } = K.unblendFeatures(b.mesh, del, b.features.filter(f => !del.includes(f)))); } catch (e) { console.error(e); }
+  const { mesh: m, keep } = unblendTag(body(bodyId), tag);
   if (!m) return UI.toast('Löschen nicht möglich');
   patchBody(bodyId, { mesh: m, features: keep });
   st.op = null;
   setPreview(null);
   clearSel();
   commit();
+}
+
+// Rundung/Fase bearbeiten: wie Löschen, dann die wieder scharfen Kanten mit Art und Maß der Rundung neu
+// verrunden. Erst Fertig übernimmt das; Abbrechen (oder jedes andere Verlassen) stellt den Körper wieder her.
+function editFeature(bodyId, tag) {
+  const b = body(bodyId), f = b.features.find(x => x.tag === tag), { del, mesh: m, keep } = unblendTag(b, tag);
+  if (!m) return UI.toast('Bearbeiten nicht möglich');
+  const box = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  for (const x of del) for (const g of [x.tool, x.region]) if (g) for (let i = 0; i < g.v.length; i++) {
+    box.min[i % 3] = Math.min(box.min[i % 3], g.v[i] - 0.05);
+    box.max[i % 3] = Math.max(box.max[i % 3], g.v[i] + 0.05);
+  }
+  const idx = restoredChains(m, b.mesh, box);
+  if (!idx.length) return UI.toast('Bearbeiten nicht möglich – Rundung löschen und neu anlegen');
+  stopTransform();
+  st.op = null;
+  setPreview(null);
+  patchBody(bodyId, { mesh: m, features: keep });
+  clearSel();
+  sel.edges = idx.map(i => ({ bodyId, idx: i, mesh: m }));
+  startEdgeOp(f.kind === 'chamfer' ? 'chamfer' : 'fillet', {
+    size: f.size || 2,
+    restore() { if (body(bodyId)) { doc.bodies = doc.bodies.map(x => (x.id === bodyId ? b : x)); clearSel(); } },
+  });
 }
 
 // ---------------------------------------------------------------- Auswahl-Werkzeug (inkl. Zieh-Pfeil)
@@ -1005,6 +1041,7 @@ function renderBar() {
     }
     if (o.face) {
       sep();
+      if (sel.face?.feature) B('Bearbeiten', sel.face.feature.kind === 'chamfer' ? 'chamfer' : 'fillet', () => editFeature(sel.face.bodyId, sel.face.feature.tag));
       if (sel.face?.feature) B('Löschen', 'trash', deleteSelection, 'danger');
       B('Skizze', 'pencil', () => startDraw('line'));
       B('Körper', 'box', () => { const id = sel.face.bodyId; clearSel(); sel.bodies = [id]; selectionChanged(); });
@@ -1052,6 +1089,7 @@ function renderBar() {
     if (f) L('Löschen macht die Kante wieder scharf', true);
     sep();
     B('Körper', 'box', () => { const id = sel.face.bodyId; clearSel(); sel.bodies = [id]; selectionChanged(); });
+    if (f) B('Bearbeiten', f.kind === 'chamfer' ? 'chamfer' : 'fillet', () => editFeature(sel.face.bodyId, f.tag));
     if (f) B('Löschen', 'trash', deleteSelection, 'danger');
   } else if (sel.edges.length) {
     L(sel.edges.length + (sel.edges.length > 1 ? ' Kanten' : ' Kante'));
@@ -1097,7 +1135,7 @@ function edgeTools(b, picked, kind, size) {
   const make = list => {
     const chains = joinChains(b.mesh, list), base = nextTag(b);
     const ts = [...chains.map(ch => buildEdgeTool(b.mesh, ch, kind, size)), ...cornerTools(b.mesh, chains, kind, size)];
-    ts.forEach((t, i) => Object.assign(t, { tag: base + i, kind, links: t.chains?.map(ci => base + ci) }));
+    ts.forEach((t, i) => Object.assign(t, { tag: base + i, kind, size, links: t.chains?.map(ci => base + ci) }));
     return ts;
   };
   const ext = tangentChains(b.mesh, picked);
@@ -1105,7 +1143,7 @@ function edgeTools(b, picked, kind, size) {
   return make(picked);
 }
 
-function startEdgeOp(kind) {
+function startEdgeOp(kind, opts = {}) {
   if (!sel.edges.length) {
     setSelectTool();
     sync();
@@ -1113,7 +1151,7 @@ function startEdgeOp(kind) {
   }
   const b = body(sel.edges[0].bodyId), all = edgeChains(b.mesh), picked = sel.edges.map(x => all[x.idx]);
   const o = {
-    type: 'edge', title: 'Kanten', kind, size: 2, bodyId: b.id, convex: true,
+    type: 'edge', title: opts.restore ? 'Bearbeiten' : 'Kanten', kind, size: opts.size || 2, bodyId: b.id, convex: true, restore: opts.restore,
     tools() { return edgeTools(b, picked, this.kind, this.size); },
     build() { const ts = this.tools(); this.convex = ts.some(t => t.convex); return K.unionAll(ts.map(K.toolMesh)); },
     result() { return K.blendFeatures(b.mesh, this.tools()); },

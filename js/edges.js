@@ -121,6 +121,28 @@ export function tangentChains(mesh, picked) {
   return [...out];
 }
 
+// Nach dem Löschen einer Rundung/Fase: Kanten von mesh, die im Bereich box ({ min, max }) liegen und in
+// before noch nicht scharf waren – also die wieder scharf gewordenen Kanten. Liefert ihre Nummern.
+export function restoredChains(mesh, before, box) {
+  const old = analyze(before).sharp, ov = before.v, v = mesh.v;
+  const OP = i => [ov[i * 3], ov[i * 3 + 1], ov[i * 3 + 2]], P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
+  const inBox = q => q.every((x, k) => x >= box.min[k] && x <= box.max[k]);
+  const onOld = q => {
+    for (let s = 0; s < old.length; s += 2) {
+      const a = OP(old[s]), ab = sub(OP(old[s + 1]), a), l2 = dot(ab, ab);
+      const u = l2 ? Math.max(0, Math.min(1, dot(sub(q, a), ab) / l2)) : 0;
+      if (Math.hypot(...sub(q, add(a, ab, u))) < 1e-3) return true;
+    }
+    return false;
+  };
+  const out = [];
+  edgeChains(mesh).forEach((c, i) => {
+    const mids = c.segs.map(g => add(P(g.u), sub(P(g.v), P(g.u)), 0.5));
+    if (mids.filter(q => inBox(q) && !onOld(q)).length * 2 > mids.length) out.push(i);
+  });
+  return out;
+}
+
 function isConvex(mesh, chain) {
   const { fn, weld } = analyze(mesh), { v, t } = mesh, s0 = chain.segs[0];
   const c2 = [t[3 * s0.t2], t[3 * s0.t2 + 1], t[3 * s0.t2 + 2]].find(i => weld[i] !== s0.u && weld[i] !== s0.v);

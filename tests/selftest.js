@@ -154,6 +154,30 @@ try {
   await wait(50);
   log(doc.bodies[1].features?.length === 1 && Math.abs(vE - K.props(doc.bodies[1].mesh).volume - 180) < 2, 'Rückgängig: Fase wieder da');
 
+  // Fase bearbeiten: Kante wird scharf, Werkzeug mit Art und Maß der Fase; Abbrechen stellt sie wieder her,
+  // Fertig mit 2 mm ersetzt sie, Rückgängig holt die 3-mm-Fase zurück
+  const editChamfer = async () => {
+    await wait(600); // kein Doppeltipp (der startet Bewegen)
+    vp.view.target.set(80, -58.5, 10.5); vp.view.dist = 70; vp.render();
+    tap(...scr(80, -58.5, 10.5));
+    vp.view.target.copy(view0.t); vp.view.dist = view0.d; vp.render();
+    [...document.querySelectorAll('#bar .btn')].find(b => b.title === 'Bearbeiten')?.click();
+  };
+  await editChamfer();
+  const vEd = K.props(doc.bodies[1].mesh).volume;
+  log(st.op?.type === 'edge' && st.op.kind === 'chamfer' && st.op.size === 3 && sel.edges.length === 1 && Math.abs(vEd - vE) < 0.5,
+    `Fase bearbeiten: ${st.op?.kind} ${st.op?.size} mm, ${sel.edges.length} Kante, V ${vEd.toFixed(1)} (Soll ${vE.toFixed(1)})`);
+  [...document.querySelectorAll('#bar .btn')].find(b => b.title === 'Abbrechen')?.click();
+  log(!st.op && doc.bodies[1].features?.length === 1 && Math.abs(vE - K.props(doc.bodies[1].mesh).volume - 180) < 2, 'Bearbeiten abgebrochen: Fase unverändert');
+  await editChamfer();
+  st.op.size = 2;
+  applyOp();
+  const dEd = vE - K.props(doc.bodies[1].mesh).volume;
+  log(doc.bodies[1].features?.length === 1 && doc.bodies[1].features[0].size === 2 && Math.abs(dEd - 80) < 2, `Fase auf 2 mm geändert: -${dEd.toFixed(1)} (Soll 80)`);
+  document.getElementById('btn-undo').click();
+  await wait(50);
+  log(doc.bodies[1].features?.length === 1 && Math.abs(vE - K.props(doc.bodies[1].mesh).volume - 180) < 2, 'Rückgängig: 3-mm-Fase wieder da');
+
   // Verrundung/Fase am Kern prüfen
   const volOf = m => K.props(m).volume;
   const blendV = (m, pick, kind, size) => volOf(K.blend(m, edgeChains(m).filter(pick).map(ch => buildEdgeTool(m, ch, kind, size))));
