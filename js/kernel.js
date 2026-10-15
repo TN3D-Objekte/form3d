@@ -16,6 +16,12 @@ export async function initKernel() {
 const TAG = 1 << 20;
 export const tagOf = (mesh, tri) => (mesh.f ? Math.floor(mesh.f[tri] / TAG) : 0);
 export const maxTag = mesh => { let m = 0; if (mesh.f) for (const x of mesh.f) m = Math.max(m, Math.floor(x / TAG)); return m; };
+// Kennungen um d verschieben (beim Zusammenführen von Körpern); d = null entfernt sie
+export function shiftTags(mesh, d) {
+  if (!mesh?.f) return mesh;
+  if (d == null) return { v: mesh.v, t: mesh.t };
+  return { v: mesh.v, t: mesh.t, f: mesh.f.map(x => (x >= TAG ? x + d * TAG : x)) };
+}
 
 function toManifold(mesh) {
   let m = cache.get(mesh);

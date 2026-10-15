@@ -198,7 +198,8 @@ export function showHelp(device = 'tablet', onDevice) {
         <li><b>Kante antippen</b> – verrunden oder fasen, Maß unten eingeben</li>
         <li><b>Rundung oder Fase antippen</b> – Löschen macht die Kante wieder scharf</li>
         <li><b>Fläche zweimal antippen</b> – ganzen Körper wählen und gleich verschieben/drehen, weitere Körper dazutippen</li>
-        <li>Unten erscheinen Bewegen, Vereinigen, Abziehen, Farbe, Löschen</li></ul></div>
+        <li>Unten erscheinen Bewegen, Kopie, Farbe, Löschen</li>
+        <li><b>Kombinieren</b> (Werkzeugleiste): Vereinigen, Abziehen oder Schnitt wählen, erst den <b>Zielkörper</b>, dann die anderen Körper antippen – Vorschau, dann Fertig. „Behalten“ blendet die Werkzeugkörper nur aus</li></ul></div>
       <div><h3>3D-Druck</h3><ul>
         <li><b>Druckprüfung</b> (Drucker oben rechts): rot Überhänge über 45° (oder 60°, umschaltbar), orange Wände unter 0,8 mm, violett Spalte/Löcher unter 1 mm; <b>Beste Lage</b> legt den Körper mit wenig Überhang auf</li>
         <li>Körper wählen → <b>Druckkanten</b>: unten Fase (kein Elefantenfuß, kein Überhang), oben Rundung – beide Maße einstellbar</li>

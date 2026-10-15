@@ -331,6 +331,8 @@ try {
   document.querySelectorAll('#panel .row-name')[n0].click();
   document.querySelectorAll('#panel .row-name')[n0 + 1].click();
   [...document.querySelectorAll('#bar .btn')].find(b => b.title === 'Abziehen').click();
+  log(st.op?.type === 'bool' && !!st.op.ready(), 'Abziehen-Vorgang mit Vorschau aus der Mehrfachauswahl');
+  applyOp();
   const vb = K.props(doc.bodies[n0].mesh).volume, wantB = 75000 - Math.PI * 400 * 30;
   log(doc.bodies.length === n0 + 1 && Math.abs(vb - wantB) < 120, `Abziehen: V ${vb.toFixed(0)} (Soll ~${wantB.toFixed(0)})`);
 
@@ -425,6 +427,46 @@ try {
     const r = Object.values(res), on = r.every(x => x[0] === '0,0,20' && !x[2]);
     log(geomOk && on && res['screw/csk'][1] < -90 && res.nut[1] < -90 && res['thread/inner'][1] < -150 && res['thread/bolt'][1] > 150,
       `Druckteile: Senkloch M3 ${csk.toFixed(0)} mm³, Gewinde M6 ${thr.toFixed(0)} mm³, Mutternfalle ${nut.toFixed(0)} mm³; auf Würfel ${JSON.stringify(res)}`);
+  }
+  // Kombinieren über die Leiste: Ziel, dann Werkzeug antippen; Abziehen, Tauschen + Schnitt, Vereinigen mit
+  // verrundeten Körpern (Kennungen bleiben eindeutig, Rundung lässt sich danach noch auswählen)
+  {
+    const PI = Math.PI, A = 9101, B = 9102, at = (m, x) => K.transform(m, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1]);
+    const vol = id => K.props(doc.bodies.find(b => b.id === id).mesh).volume;
+    const put = (a, b) => {
+      doc.bodies = doc.bodies.filter(x => x.id !== A && x.id !== B).map(x => ({ ...x, visible: false }));
+      doc.bodies.push({ id: A, name: 'A', color: '#a9b4c4', visible: true, ...a }, { id: B, name: 'B', color: '#a9b4c4', visible: true, ...b });
+      window.form3d.sync();
+      Object.assign(vp.view, { theta: -PI / 2, phi: 0.001, dist: 160 }); vp.view.target.set(0, 0, 20); vp.render();
+    };
+    const shown = doc.bodies.map(b => b.visible), box = K.primitive('box', { l: 30, b: 30, h: 20 }), cyl = at(K.primitive('cyl', { d: 10, h: 30 }), 10);
+    put({ mesh: box }, { mesh: cyl });
+    railPick('subtract');
+    await wait(300);
+    tap(...scr(-10, 0, 20)); tap(...scr(10, 0, 30));
+    const roles = st.op?.target === A && st.op.tools.join() === String(B);
+    if (stopAt === 'bool') { document.getElementById('help').hidden = true; Object.assign(vp.view, { theta: -PI / 3, phi: 1, dist: 110 }); window.form3d.refresh(); out.remove(); throw 0; }
+    applyOp();
+    const vSub = vol(A), goneB = !doc.bodies.some(b => b.id === B);
+    put({ mesh: box }, { mesh: cyl });
+    railPick('select'); railPick('intersect');
+    tap(...scr(10, 0, 30)); tap(...scr(-10, 0, 20));
+    const swapped = st.op.target === B;
+    st.op.keep = true;
+    applyOp();
+    const vInt = vol(B), keptA = doc.bodies.find(b => b.id === A)?.visible === false;
+    const fil = m => K.blendFeatures(m, edgeChains(m).filter(ch => ch.pts.every(p => p[2] > 19.9)).slice(0, 1).map(ch => Object.assign(buildEdgeTool(m, ch, 'fillet', 2), { tag: 1, kind: 'fillet', size: 2 })));
+    const fa = fil(box), fb = fil(at(box, 40));
+    put({ mesh: fa.mesh, features: fa.features }, { mesh: fb.mesh, features: fb.features });
+    railPick('select'); railPick('union');
+    tap(...scr(0, 0, 20)); tap(...scr(40, 0, 20));
+    applyOp();
+    const u = doc.bodies.find(b => b.id === A), tags = u.features.map(f => f.tag), meshTags = new Set(Array.from(u.mesh.f || [], x => Math.floor(x / 2 ** 20)).filter(Boolean));
+    railPick('select');
+    doc.bodies = doc.bodies.filter(b => b.id !== A && b.id !== B).map((b, i) => ({ ...b, visible: shown[i] })); window.form3d.sync();
+    log(roles && goneB && Math.abs(vSub - (18000 - PI * 25 * 20)) < 30 && swapped && keptA && Math.abs(vInt - PI * 25 * 20) < 30
+      && tags.join() === '1,2' && meshTags.size === 2,
+      `Kombinieren: Abziehen ${vSub.toFixed(0)} (Soll ~16429), Schnitt ${vInt.toFixed(0)} (Soll ~1571, Ziel getauscht ${swapped}, behalten+ausgeblendet ${keptA}), Vereinigen Rundungen ${tags} / im Netz ${[...meshTags]}`);
   }
   // Schraubenlöcher: Kernloch d − P, Länge ab Kopfunterkante (Zylinderkopf) bzw. mit Kopf (Senkkopf), auch wenn der Kopf höher als die Länge ist
   {

@@ -48,6 +48,7 @@ const overlayMat = (color, opacity, extra = {}) => new THREE.MeshBasicMaterial({
 const regMat = overlayMat(0x3b82f6, 0.13), regMatSel = overlayMat(0x2563eb, 0.45), faceMat = overlayMat(0x2563eb, 0.42);
 const prevMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.5, depthWrite: false });
 const prevCutMat = new THREE.MeshStandardMaterial({ color: 0xe5484d, transparent: true, opacity: 0.45, depthWrite: false, depthTest: false });
+const prevResMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.55, metalness: 0.04, emissive: 0x1d4ed8, emissiveIntensity: 0.15 });
 
 for (const [key, color] of [['xy', 0x3b82f6], ['xz', 0x30a46c], ['yz', 0xe5484d]]) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(140, 140), overlayMat(color, 0.17, { polygonOffset: false }));
@@ -110,12 +111,19 @@ function syncBodies() {
     }
     if (st.check && !bv.check) { bv.check = checkOverlay(b, bv); bv.group.add(bv.check); }
     if (!st.check && bv.check) { bv.group.remove(bv.check); bv.check.geometry.dispose(); bv.check.material.dispose(); bv.check = null; }
-    const on = sel.bodies.includes(b.id);
+    // Kombinieren: Ziel blau, Werkzeuge (beim Abziehen rot); steht das Ergebnis als Vorschau, werden beide durchsichtig
+    const bo = st.op?.type === 'bool' ? st.op : null, tool = bo?.tools.includes(b.id);
+    const on = bo ? b.id === bo.target || tool : sel.bodies.includes(b.id), ghost = !!(on && bo?.ready());
+    const hl = tool && bo.kind === 'subtract' ? 0xe5484d : 0x2563eb;
     bv.group.visible = b.visible;
     bv.mesh.material.color.set(b.color);
-    bv.mesh.material.emissive.set(on ? 0x2563eb : 0x000000);
+    bv.mesh.material.emissive.set(on ? hl : 0x000000);
     bv.mesh.material.emissiveIntensity = on ? 0.4 : 0;
-    bv.edges.material.color.set(on ? 0x1d4ed8 : 0x1f2630);
+    bv.edges.material.color.set(on ? (tool && bo.kind === 'subtract' ? 0xb91c1c : 0x1d4ed8) : 0x1f2630);
+    for (const m of [bv.mesh.material, bv.edges.material]) {
+      if (m.transparent !== ghost) { m.transparent = ghost; m.depthWrite = !ghost; m.needsUpdate = true; }
+      m.opacity = ghost ? (tool ? 0.25 : 0.04) : 1;
+    }
   }
   for (const [id, bv] of views) if (!seen.has(id)) { dropView(bv); views.delete(id); }
 }
@@ -168,10 +176,10 @@ function syncHighlights() {
   faceHL = new THREE.Mesh(g, faceMat);
   gAux.add(faceHL);
 }
-function setPreview(mesh, cut) {
+function setPreview(mesh, cut, mat = cut ? prevCutMat : prevMat) {
   if (preview) { gAux.remove(preview); preview.geometry.dispose(); preview = null; }
   if (!mesh) return;
-  preview = new THREE.Mesh(geometryOf(analyze(mesh)), cut ? prevCutMat : prevMat);
+  preview = new THREE.Mesh(geometryOf(analyze(mesh)), mat);
   preview.renderOrder = 5;
   gAux.add(preview);
 }
@@ -228,7 +236,7 @@ function sync() {
   renderBar();
   renderPanel();
   renderTop();
-  UI.setRailActive($('rail'), st.xf ? 'move' : st.op?.type === 'revolve' ? 'revolve' : st.op?.type === 'prim' || st.op?.type === 'edge' || st.op?.type === 'part' ? st.op.kind : st.pickPlane ? st.pendingTool : st.tool);
+  UI.setRailActive($('rail'), st.xf ? 'move' : st.op?.type === 'revolve' ? 'revolve' : st.op?.type === 'prim' || st.op?.type === 'edge' || st.op?.type === 'part' || st.op?.type === 'bool' ? st.op.kind : st.pickPlane ? st.pendingTool : st.tool);
   vp.requestRender();
 }
 onChange(sync);
@@ -287,9 +295,8 @@ function applySolid(tool, mode, parentId, auto) {
   if (mode === 'add') {
     const targets = doc.bodies.filter(b => b === parent || (!auto && b.visible && K.intersects(b.mesh, tool)));
     if (targets.length) {
-      let m = tool;
-      for (const t of targets) m = K.boolean('union', t.mesh, m);
-      patchBody(targets[0].id, { mesh: m, features: targets.flatMap(t => t.features || []) });
+      const parts = retagged(targets);
+      patchBody(targets[0].id, { mesh: K.unionAll([...parts.map(p => p.mesh), tool]), features: parts.flatMap(p => p.features) });
       removeBodies(targets.slice(1).map(t => t.id));
       return;
     }
@@ -422,7 +429,7 @@ function refreshOp() {
   const o = st.op;
   let mesh = null;
   if (o) { try { mesh = o.build(); } catch (e) { console.warn(e); } }
-  setPreview(mesh, o && resolveMode(o) === 'cut');
+  setPreview(mesh, o && resolveMode(o) === 'cut', o?.type === 'bool' ? prevResMat : undefined);
   renderBar();
   vp.requestRender();
 }
@@ -430,6 +437,7 @@ function refreshOp() {
 function applyOp() {
   const o = st.op;
   if (!o) return;
+  if (o.type === 'bool') return applyBoolean(o);
   if (o.type === 'edge') {
     try {
       const r = o.result();
@@ -557,6 +565,10 @@ function pick(e, dbl) {
   }
   if (o?.type === 'prim') return;
   if (o?.type === 'part') return placePart(o, e);
+  if (o?.type === 'bool') {
+    const hb = vp.ray(e.x, e.y).intersectObjects(bodyMeshes(), false)[0];
+    return hb ? toggleBoolBody(o, hb.object.userData.bodyId) : UI.toast(boolHint(o));
+  }
   const badge = badgeAt(e);
   if (badge) { clearSel(); sel.con = badge; return selectionChanged(); }
   const ent = pickEntity(e), edge = ent || dbl ? null : pickEdge(e), hit = ent || edge ? null : pickSurface(e);
@@ -1062,15 +1074,74 @@ vp.gizmo.addEventListener('dragging-changed', e => {
   bake(d);
 });
 
-function doBoolean(op) {
-  const [first, ...rest] = sel.bodies.map(body);
-  let m = first.mesh;
-  for (const r of rest) m = m && K.boolean(op, m, r.mesh);
-  if (!m) return UI.toast('Das Ergebnis wäre leer');
-  removeBodies(rest.map(r => r.id));
-  patchBody(first.id, { mesh: m, features: op === 'union' ? [first, ...rest].flatMap(b => b.features || []) : first.features });
-  sel.bodies = [first.id];
+// Rundungen/Fasen mehrerer Körper zusammenführen: die Kennungen jedes weiteren Körpers werden hinter die
+// des vorigen verschoben, damit sie eindeutig bleiben (12 Bit; reicht es nicht, entfallen die Rundungen)
+function retagged(bodies) {
+  let base = 0;
+  return bodies.map(b => {
+    const d = base, used = Math.max(K.maxTag(b.mesh), ...(b.features || []).map(f => f.tag));
+    base += used;
+    if (!d || !used) return { mesh: b.mesh, features: b.features || [] };
+    if (base >= 4000) return { mesh: K.shiftTags(b.mesh, null), features: [] };
+    const sh = m => K.shiftTags(m, d);
+    return { mesh: sh(b.mesh), features: (b.features || []).map(f => ({ ...f, tag: f.tag + d, links: f.links?.map(l => l + d), region: sh(f.region), tool: f.tool && sh(f.tool) })) };
+  });
+}
+
+// Körper kombinieren: Zielkörper mit Werkzeugkörpern vereinigen, sie abziehen oder die Schnittmenge bilden.
+// Beim Abziehen und Schneiden bleiben nur die Rundungen des Zielkörpers erhalten.
+const BOOL = { union: 'Vereinigen', subtract: 'Abziehen', intersect: 'Schnittmenge' };
+function combine(kind, target, tools) {
+  if (kind === 'union') {
+    const parts = retagged([target, ...tools]);
+    return { mesh: K.unionAll(parts.map(p => p.mesh)), features: parts.flatMap(p => p.features) };
+  }
+  let m = target.mesh;
+  for (const t of tools) m = m && K.boolean(kind, m, K.shiftTags(t.mesh, null));
+  return { mesh: m, features: target.features || [] };
+}
+function makeBoolean(kind, target, tools) {
+  return {
+    type: 'bool', kind, title: BOOL[kind], target, tools, keep: false,
+    ready() { return this.target != null && this.tools.length > 0; },
+    result() { return combine(this.kind, body(this.target), this.tools.map(body)); },
+    build() { return this.ready() ? this.result().mesh : null; },
+  };
+}
+// Gewählte Körper übernehmen: der erste ist das Ziel, die weiteren die Werkzeuge
+function startBoolean(kind) {
+  const ids = (sel.bodies.length ? sel.bodies : sel.face ? [sel.face.bodyId] : []).filter(body);
+  stopTransform();
+  setSelectTool();
+  endSketch();
+  clearSel();
+  st.op = makeBoolean(kind, ids[0] ?? null, ids.slice(1));
+  sync();
+  refreshOp();
+  if (!st.op.ready()) UI.toast(ids.length ? boolHint(st.op) : 'Zuerst den Zielkörper antippen, dann die weiteren Körper');
+}
+const boolHint = o => (o.target == null ? 'Zielkörper antippen' : o.tools.length ? 'weitere Körper antippen oder Fertig' : o.kind === 'subtract' ? 'Körper antippen, die abgezogen werden' : o.kind === 'union' ? 'Körper antippen, die angefügt werden' : 'Körper antippen, mit denen geschnitten wird');
+// Körper antippen: erst Ziel, dann Werkzeuge; nochmal antippen nimmt ihn wieder heraus
+function toggleBoolBody(o, id) {
+  if (o.target == null) o.target = id;
+  else if (o.target === id) o.target = o.tools.shift() ?? null;
+  else { const i = o.tools.indexOf(id); if (i < 0) o.tools.push(id); else o.tools.splice(i, 1); }
+  sync();
+  refreshOp();
+}
+function applyBoolean(o) {
+  let r = null;
+  try { r = o.result(); } catch (e) { console.error(e); return UI.toast('Kombinieren fehlgeschlagen'); }
+  if (!r.mesh) return UI.toast('Das Ergebnis wäre leer – die Körper überschneiden sich nicht');
+  patchBody(o.target, { mesh: r.mesh, features: r.features });
+  if (o.keep) doc.bodies = doc.bodies.map(b => (o.tools.includes(b.id) ? { ...b, visible: false } : b));
+  else removeBodies(o.tools);
+  st.op = null;
+  setPreview(null);
+  clearSel();
+  sel.bodies = [o.target];
   commit();
+  if (o.keep) UI.toast('Werkzeugkörper ausgeblendet – in der Elementliste wieder einblenden');
 }
 
 function duplicate() {
@@ -1109,6 +1180,12 @@ function renderBar() {
       if (o.variants) items.push({ type: 'seg', value: o.variant, options: o.variants, onChange: v => { o.variant = v; refreshOp(); } });
       if (o.kind === 'screw') items.push({ type: 'seg', value: o.grip, options: [['core', 'Kernloch ⌀' + UI.fmt(Parts.coreHole(o.m))], ['clear', 'Durchgang']], onChange: g => { o.grip = g; refreshOp(); } });
       F(o.kind === 'nut' ? 'Tiefe' : o.kind === 'screw' ? 'Schraubenlänge' : 'Länge', o.depth, 'mm', v => { if (v > 0) { o.depth = v; refreshOp(); } });
+    }
+    if (o.type === 'bool') {
+      L(o.ready() ? `1 + ${o.tools.length} Körper` : boolHint(o), !o.ready());
+      items.push({ type: 'seg', value: o.kind, options: Object.entries(BOOL), onChange: k => { o.kind = k; o.title = BOOL[k]; sync(); refreshOp(); } });
+      if (o.kind !== 'union' && o.target != null && o.tools.length === 1) B('Tauschen', null, () => { [o.target, o.tools[0]] = [o.tools[0], o.target]; sync(); refreshOp(); });
+      items.push({ type: 'seg', value: o.keep ? 'keep' : 'drop', options: [['drop', 'Werkzeug entfernen'], ['keep', 'behalten']], onChange: v => { o.keep = v === 'keep'; renderBar(); } });
     }
     if (o.type === 'prim') {
       const names = { l: 'Länge', b: 'Breite', h: 'Höhe', d: 'Durchmesser' };
@@ -1168,11 +1245,7 @@ function renderBar() {
     B('Bewegen', 'move', () => startTransform());
     if (sel.bodies.length === 1) B('Druckkanten', 'chamfer', () => startPrintEdges(sel.bodies[0]));
     B('Kopie', 'copy', duplicate);
-    if (sel.bodies.length > 1) {
-      B('Vereinigen', 'union', () => doBoolean('union'));
-      B('Abziehen', 'subtract', () => doBoolean('subtract'));
-      B('Schnitt', 'intersect', () => doBoolean('intersect'));
-    }
+    if (sel.bodies.length > 1) for (const k of Object.keys(BOOL)) B(k === 'intersect' ? 'Schnitt' : BOOL[k], k, () => startBoolean(k));
     items.push({ type: 'colors', colors: COLORS, value: body(sel.bodies[0]).color, onChange: c => { for (const id of sel.bodies) patchBody(id, { color: c }); commit(); } });
     B('Löschen', 'trash', deleteSelection, 'danger', true);
   } else if (sel.face) {
@@ -1302,6 +1375,7 @@ const RAIL = [
   { title: 'Skizze', tools: [{ id: 'line', label: 'Linie', icon: 'line' }, { id: 'rect', label: 'Rechteck', icon: 'rect' }, { id: 'circle', label: 'Kreis', icon: 'circle' }, { id: 'arc', label: 'Bogen', icon: 'arc' }] },
   { title: 'Formen', tools: [{ id: 'extrude', label: 'Extrusion', icon: 'extrude' }, { id: 'revolve', label: 'Rotation', icon: 'revolve' }, { id: 'fillet', label: 'Rundung', icon: 'fillet' }, { id: 'chamfer', label: 'Fase', icon: 'chamfer' }, { id: 'move', label: 'Bewegen', icon: 'move' }] },
   { title: 'Körper', tools: [{ id: 'box', label: 'Quader', icon: 'box' }, { id: 'cyl', label: 'Zylinder', icon: 'cyl' }, { id: 'sphere', label: 'Kugel', icon: 'sphere' }] },
+  { title: 'Kombinieren', tools: [{ id: 'union', label: 'Vereinigen', icon: 'union' }, { id: 'subtract', label: 'Abziehen', icon: 'subtract' }, { id: 'intersect', label: 'Schnitt', icon: 'intersect' }] },
   { title: 'Druckteile', tools: [{ id: 'screw', label: 'Schraube', icon: 'screw' }, { id: 'nut', label: 'Mutter', icon: 'nut' }, { id: 'thread', label: 'Gewinde', icon: 'thread' }] },
 ];
 
@@ -1311,6 +1385,7 @@ function railPick(id) {
   if (id === 'move') return startTransform();
   if (id === 'revolve') { setSelectTool(); return startRevolve(); }
   if (id === 'fillet' || id === 'chamfer') return startEdgeOp(id);
+  if (BOOL[id]) return startBoolean(id);
   stopTransform();
   setSelectTool();
   if (id === 'extrude') {
@@ -1402,6 +1477,7 @@ function renderPanel() {
       commit();
     },
     pick(kind, id) {
+      if (kind === 'body' && st.op?.type === 'bool') return toggleBoolBody(st.op, id);
       if (kind === 'body') {
         const bodies = sel.bodies.slice(), i = bodies.indexOf(id);
         clearSel();
