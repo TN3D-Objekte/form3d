@@ -336,10 +336,16 @@ function freeMode(o) {
   return o.free.touch ? 'add' : 'new';
 }
 
+// Passungen für den 3D-Druck: Spalt je Seite. Löcher/Taschen (Abzug) werden größer, Zapfen kleiner.
+const FITS = { none: ['Keine', 0], press: ['Press', 0.05], snug: ['Steck', 0.15], loose: ['Spiel', 0.3] };
 function makeExtrude(p) {
   return {
-    type: 'extrude', mode: 'auto', dist: 0, handle: true, ...p,
-    build() { return Math.abs(this.dist) < 1e-6 ? null : K.extrude(this.regions, this.plane, this.dist, resolveMode(this) === 'cut' ? CUT_OVER : 0); },
+    type: 'extrude', mode: 'auto', dist: 0, handle: true, fit: 'none', ...p,
+    build() {
+      if (Math.abs(this.dist) < 1e-6) return null;
+      const cut = resolveMode(this) === 'cut', gap = this.face ? 0 : FITS[this.fit][1];
+      return K.extrude(this.regions, this.plane, this.dist, cut ? CUT_OVER : 0, cut ? gap : -gap);
+    },
   };
 }
 function makeRevolve(p) {
@@ -1060,6 +1066,10 @@ function renderBar() {
     }
     if ((o.type === 'extrude' || o.type === 'revolve') && !o.face) {
       items.push({ type: 'seg', value: o.mode, options: [['auto', 'Auto'], ['new', 'Neu'], ['add', 'Hinzu'], ['cut', 'Abzug']], onChange: m => { o.mode = m; refreshOp(); } });
+    }
+    if (o.type === 'extrude' && !o.face) {
+      L('Passung', true);
+      items.push({ type: 'seg', value: o.fit, options: Object.entries(FITS).map(([k, [label]]) => [k, label]), onChange: f => { o.fit = f; refreshOp(); } });
     }
     if (o.face) {
       sep();

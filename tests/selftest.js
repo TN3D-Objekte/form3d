@@ -360,6 +360,15 @@ try {
       `Druckkanten: ${JSON.stringify(op)}, −${dv.toFixed(1)} mm³ (Soll ~31), Überhang ${c.over.toFixed(2)} mm², ${kinds}`);
     doc.bodies = doc.bodies.filter(b => b.id !== id); window.form3d.sync();
   }
+  // Passungen: Spiel 0,3 mm je Seite – Loch (Abzug) größer, Zapfen kleiner; Ecken bleiben spitz
+  {
+    const sq = [{ outer: [[-5, -5], [5, -5], [5, 5], [-5, 5]], holes: [] }];
+    const vHole = K.props(K.extrude(sq, S.BASE_PLANES.xy, 5, 0, 0.3)).volume, vPin = K.props(K.extrude(sq, S.BASE_PLANES.xy, 5, 0, -0.3)).volume;
+    const mk = mode => window.form3d.makeExtrude({ regions: sq, plane: S.BASE_PLANES.xy, dist: 5, mode, fit: 'loose', parentId: null });
+    const vCut = K.props(mk('cut').build()).volume, vNew = K.props(mk('new').build()).volume;
+    log(Math.abs(vHole - 10.6 * 10.6 * 5) < 0.01 && Math.abs(vPin - 9.4 * 9.4 * 5) < 0.01 && vCut > 112 * 5 && Math.abs(vNew - vPin) < 0.01,
+      `Passung Spiel: Loch ${(vHole / 5).toFixed(2)} mm² (Soll 112,36), Zapfen ${(vPin / 5).toFixed(2)} mm² (Soll 88,36), Abzug größer / Neu kleiner`);
+  }
   // 3MF: ZIP-Verzeichnis lesen, Prüfsumme und Modell (Punkte/Dreiecke je Körper) wie ein Slicer prüfen
   {
     const z = export3MF(doc.bodies), dv = new DataView(z.buffer), dec = new TextDecoder(), files = {};

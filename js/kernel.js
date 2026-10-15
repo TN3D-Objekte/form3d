@@ -56,8 +56,11 @@ function crossSection(regions) {
 }
 
 // over: Überstand an beiden Enden, damit Schnittkörper nicht genau in Körperflächen enden
-export function extrude(regions, plane, d, over = 0) {
-  let m = Manifold.extrude(crossSection(regions), Math.abs(d) + 2 * over);
+// offset: Profil vorher um diesen Betrag vergrößern (< 0: verkleinern), Ecken bleiben spitz – für Passungen
+export function extrude(regions, plane, d, over = 0, offset = 0) {
+  let cs = crossSection(regions);
+  if (offset) cs = cs.offset(offset, 'Miter', 4);
+  let m = Manifold.extrude(cs, Math.abs(d) + 2 * over);
   m = m.translate([0, 0, Math.min(d, 0) - over]);
   return toMesh(m.transform(planeMatrix(plane)));
 }
