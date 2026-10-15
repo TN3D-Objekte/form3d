@@ -11,7 +11,7 @@ import * as UI from './ui.js';
 import * as Layout from './layout.js';
 import { exportSTL, exportOBJ, export3MF, download, share } from './exporters.js';
 import * as Bug from './bugrec.js';
-import { checkPrint, bestOrientation, OVER, THIN, GAP, LIMITS } from './printcheck.js';
+import { checkPrint, bestOrientation, setOverhang, OVER, THIN, GAP, LIMITS } from './printcheck.js';
 import * as Parts from './parts.js';
 
 const $ = id => document.getElementById(id);
@@ -366,7 +366,7 @@ function makePrim(kind) {
 
 // Druckteile: Schraubenloch, Mutternfalle, Gewinde – Körperfläche antippen, dort senkrecht zur Fläche
 const PARTS = {
-  screw: { title: 'Schraubenloch', variants: [['csk', 'Senkkopf'], ['cap', 'Zylinderkopf'], ['none', 'Ohne Kopf']], variant: 'csk', depth: 10, m: 'M3' },
+  screw: { title: 'Schraubenloch', variants: [['csk', 'Senkkopf'], ['cap', 'Zylinderkopf'], ['none', 'Ohne Kopf']], variant: 'csk', depth: 12, m: 'M3', grip: 'core' },
   nut: { title: 'Mutternfalle', variants: null, depth: 10, m: 'M3' },
   thread: { title: 'Gewinde', variants: [['inner', 'Innengewinde'], ['bolt', 'Bolzen']], variant: 'inner', depth: 10, m: 'M6' },
 };
@@ -378,7 +378,7 @@ function makePart(kind) {
       if (!this.place) return null;
       const { p, n } = this.place, out = this.mode === 'add';
       let local;
-      if (this.kind === 'screw') local = Parts.screwHole(this.m, this.variant, this.depth);
+      if (this.kind === 'screw') local = Parts.screwHole(this.m, this.variant, this.depth, this.grip);
       else if (this.kind === 'nut') local = Parts.nutTrap(this.m, this.depth);
       else local = out ? Parts.thread(this.m, -0.3, this.depth, false) : Parts.thread(this.m, -0.05, this.depth, true);
       // lokales System: z in das Material (Bolzen: aus der Fläche heraus)
@@ -1098,7 +1098,8 @@ function renderBar() {
       if (!o.place) L('Körperfläche antippen', true);
       items.push({ type: 'seg', value: o.m, options: Parts.SIZES.map(m => [m, m]), onChange: m => { o.m = m; refreshOp(); } });
       if (o.variants) items.push({ type: 'seg', value: o.variant, options: o.variants, onChange: v => { o.variant = v; refreshOp(); } });
-      F(o.kind === 'thread' ? 'Länge' : 'Tiefe', o.depth, 'mm', v => { if (v > 0) { o.depth = v; refreshOp(); } });
+      if (o.kind === 'screw') items.push({ type: 'seg', value: o.grip, options: [['core', 'Kernloch ⌀' + UI.fmt(Parts.coreHole(o.m))], ['clear', 'Durchgang']], onChange: g => { o.grip = g; refreshOp(); } });
+      F(o.kind === 'nut' ? 'Tiefe' : o.kind === 'screw' ? 'Schraubenlänge' : 'Länge', o.depth, 'mm', v => { if (v > 0) { o.depth = v; refreshOp(); } });
     }
     if (o.type === 'prim') {
       const names = { l: 'Länge', b: 'Breite', h: 'Höhe', d: 'Durchmesser' };
@@ -1338,6 +1339,11 @@ function renderCheck() {
     kids.push(UI.h('span', { class: 'ck' }, 'Auflage ' + cm2(o.current.bed)));
     if (o.best.score < o.current.score * 0.8 - 20) kids.push(UI.h('button', { onclick: () => orientBody(b.id, o.best.down) }, 'Beste Lage: Überhang ' + cm2(o.best.over)));
   }
+  kids.push(UI.h('span', { class: 'seg' }, ...[45, 60].map(a => UI.h('button', {
+    class: LIMITS.overhang === a ? 'on' : '', title: 'Überhanggrenze ' + a + '°',
+    onclick: () => { setOverhang(a); try { localStorage.setItem('form3d-overhang', a); } catch { /* privater Modus */ } st.check = false; sync(); st.check = true; sync(); },
+  }, a + '°'))));
+  kids.push(UI.h('button', { class: 'plain', title: 'Tipps für den 3D-Druck', 'aria-label': 'Tipps für den 3D-Druck', onclick: () => { location.href = 'tipps.html#ueberhang'; } }, '?'));
   kids.push(UI.h('button', { class: 'plain', title: 'Druckprüfung beenden', 'aria-label': 'Druckprüfung beenden', onclick: toggleCheck, html: UI.icon('x') }));
   el.replaceChildren(...kids);
 }
@@ -1460,6 +1466,7 @@ function openMenu() {
     { label: 'Gerät: ' + DEVICES[vp.device] + ' …', onClick: showHelp },
     { label: 'Leisten anordnen …', onClick: Layout.arrange },
     { label: 'Kurzanleitung', onClick: showHelp },
+    { label: 'Tipps für den 3D-Druck', onClick: () => { location.href = 'tipps.html'; } },
     Bug.recording() ? null : { label: 'Fehler aufzeichnen …', onClick: () => Bug.start({ vp, state: appState, toFile }) },
     { label: 'Datenschutz & Lizenzen', onClick: () => { location.href = 'datenschutz.html'; } },
   ]);
@@ -1702,6 +1709,7 @@ async function init() {
   try { saved = localStorage.getItem('form3d-device'); } catch { /* privater Modus */ }
   vp.device = DEVICES[saved] ? saved : guessDevice();
   if (innerWidth < 760) $('panel').classList.add('closed');
+  try { const a = +localStorage.getItem('form3d-overhang'); if (a === 45 || a === 60) setOverhang(a); } catch { /* privater Modus */ }
   Layout.init();
   vp.onPen = () => { if (vp.device === 'tablet') UI.toast('Apple Pencil erkannt – der Stift zeichnet, Finger navigieren'); };
   await K.initKernel();

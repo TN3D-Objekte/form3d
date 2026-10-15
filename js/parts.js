@@ -26,22 +26,32 @@ const ccw = poly => {
   return a < 0 ? poly.slice().reverse() : poly;
 };
 
-// Schraubenloch: head = 'csk' (Senkkopf 90°), 'cap' (Zylinderkopf, angesenkt) oder 'none'
-export function screwHole(m, head, depth) {
-  const s = ISO[m], rh = s.hole / 2;
+// Schraubenloch: head = 'csk' (Senkkopf 90°), 'cap' (Zylinderkopf, angesenkt) oder 'none'.
+// len = Schraubenlänge nach Norm: beim Senkkopf mit Kopf, beim Zylinderkopf ab Unterkante Kopf.
+// grip = 'core': Kernloch d − P, die Schraube schneidet ihr Gewinde selbst in den Kunststoff;
+// 'clear': Durchgangsloch, die Schraube steckt lose (Mutter oder Gewinde im Gegenstück).
+export const TIP = 0.5; // Luft unter der Schraubenspitze
+export function screwHole(m, head, len, grip = 'clear') {
+  const s = ISO[m], rh = grip === 'core' ? (s.d - s.p) / 2 : s.hole / 2;
   let prof;
-  if (head === 'csk') { const rk = (s.csk + PLAY) / 2; prof = [[0, -OVER], [rk, -OVER], [rk, 0], [rh, rk - rh], [rh, depth], [0, depth]]; }
-  else if (head === 'cap') { const rc = (s.cap + 2 * PLAY) / 2, kc = s.capH + PLAY; prof = [[0, -OVER], [rc, -OVER], [rc, kc], [rh, kc], [rh, depth], [0, depth]]; }
-  else prof = [[0, -OVER], [rh, -OVER], [rh, depth], [0, depth]];
+  if (head === 'csk') {
+    const rk = (s.csk + PLAY) / 2, cone = rk - rh, end = Math.max(len, cone + 0.5) + TIP;
+    prof = [[0, -OVER], [rk, -OVER], [rk, 0], [rh, cone], [rh, end], [0, end]];
+  } else if (head === 'cap') {
+    const rc = (s.cap + 2 * PLAY) / 2, kc = s.capH + PLAY, end = kc + len + TIP;
+    prof = [[0, -OVER], [rc, -OVER], [rc, kc], [rh, kc], [rh, end], [0, end]];
+  } else prof = [[0, -OVER], [rh, -OVER], [rh, len + TIP], [0, len + TIP]];
   return K.lathe(ccw(prof));
 }
+// Kernloch-Durchmesser (für Anzeige und Tipps)
+export const coreHole = m => ISO[m].d - ISO[m].p;
 
 // Mutternfalle: Sechskant (Schlüsselweite + Spiel) in Mutternhöhe, darunter das Durchgangsloch bis depth
 export function nutTrap(m, depth) {
   const s = ISO[m], r = (s.nut + PLAY) / 2 / Math.cos(Math.PI / 6), h = s.nutH + PLAY;
   const hex = Array.from({ length: 6 }, (_, i) => [r * Math.cos(i * Math.PI / 3), r * Math.sin(i * Math.PI / 3)]);
   const pocket = K.extrudeZ(hex, -OVER, h);
-  return depth > h ? K.boolean('union', pocket, screwHole(m, 'none', depth)) : pocket;
+  return depth > h ? K.boolean('union', pocket, screwHole(m, 'none', depth - TIP)) : pocket;
 }
 
 // Gewinde (60°-Regelgewinde): inner = Werkzeug für ein Innengewinde (etwas größer), sonst Bolzen

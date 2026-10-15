@@ -396,6 +396,15 @@ try {
     log(geomOk && on && res['screw/csk'][1] < -90 && res.nut[1] < -90 && res['thread/inner'][1] < -150 && res['thread/bolt'][1] > 150,
       `Druckteile: Senkloch M3 ${csk.toFixed(0)} mm³, Gewinde M6 ${thr.toFixed(0)} mm³, Mutternfalle ${nut.toFixed(0)} mm³; auf Würfel ${JSON.stringify(res)}`);
   }
+  // Schraubenlöcher: Kernloch d − P, Länge ab Kopfunterkante (Zylinderkopf) bzw. mit Kopf (Senkkopf), auch wenn der Kopf höher als die Länge ist
+  {
+    const PI = Math.PI, vol = m => K.props(m).volume, box = m => { const v = m.v; let lo = Infinity, hi = -Infinity; for (let i = 2; i < v.length; i += 3) { lo = Math.min(lo, v[i]); hi = Math.max(hi, v[i]); } return [lo, hi]; };
+    const core = vol(Parts.screwHole('M3', 'none', 10, 'core')), coreSoll = PI * 1.25 ** 2 * (10 + Parts.TIP + 0.05);
+    const cap = Parts.screwHole('M12', 'cap', 6, 'clear'), capEnd = box(cap)[1], capSoll = 12.2 + 6 + Parts.TIP;
+    const csk = box(Parts.screwHole('M3', 'csk', 12, 'core'))[1];
+    log(Math.abs(core - coreSoll) / coreSoll < 0.01 && Math.abs(capEnd - capSoll) < 1e-3 && vol(cap) > PI * 9.2 ** 2 * 12 && Math.abs(csk - 12.5) < 1e-3,
+      `Schraubenloch: Kernloch M3 ⌀${Parts.coreHole('M3')} ${core.toFixed(1)} mm³ (Soll ${coreSoll.toFixed(1)}), Zylinderkopf M12 × 6 bis ${capEnd.toFixed(2)} mm (Soll ${capSoll.toFixed(2)}), Senkkopf M3 × 12 bis ${csk.toFixed(2)} mm`);
+  }
   // 3MF: ZIP-Verzeichnis lesen, Prüfsumme und Modell (Punkte/Dreiecke je Körper) wie ein Slicer prüfen
   {
     const z = export3MF(doc.bodies), dv = new DataView(z.buffer), dec = new TextDecoder(), files = {};

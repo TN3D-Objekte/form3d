@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#eef0f4">
+<link rel="icon" href="icons/icon-180.png">
+<title>Form3D – Tipps für den 3D-Druck</title>
+<style>
+  :root { --bg: #eef0f4; --card: #fff; --text: #111827; --body: #344054; --muted: #667085; --accent: #2563eb; --line: rgba(17, 24, 39, 0.1); --ok: #079455; --warn: #dc6803; --bad: #d92d20; }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 32px); }
+  main { max-width: 760px; margin: 0 auto; background: var(--card); border-radius: 20px; padding: 24px 26px; box-shadow: 0 6px 24px rgba(16, 24, 40, 0.12); }
+  h1 { font-size: 25px; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 34px 0 8px; color: var(--accent); scroll-margin-top: 16px; }
+  h3 { font-size: 16px; margin: 18px 0 4px; }
+  p, li { color: var(--body); }
+  ul { padding-left: 20px; }
+  li { margin: 4px 0; }
+  a { color: var(--accent); }
+  .back { display: inline-block; margin-bottom: 16px; text-decoration: none; font-weight: 600; }
+  .lead { color: var(--body); margin: 6px 0 18px; }
+  .toc { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; list-style: none; margin: 0 0 8px; }
+  .toc a { display: inline-block; padding: 7px 12px; border-radius: 999px; background: var(--bg); text-decoration: none; font-weight: 600; font-size: 14px; color: var(--text); }
+  .note { background: var(--bg); border-radius: 12px; padding: 10px 14px; color: var(--body); margin: 12px 0; }
+  .note b:first-child { color: var(--text); }
+  .app { border-left: 4px solid var(--accent); background: rgba(37, 99, 235, 0.06); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 650; padding: 6px 8px 6px 0; color: var(--text); border-bottom: 2px solid var(--line); }
+  td { padding: 6px 8px 6px 0; border-top: 1px solid var(--line); vertical-align: top; color: var(--body); }
+  .scroll { overflow-x: auto; }
+  figure { margin: 14px 0; }
+  figure svg { width: 100%; max-width: 560px; height: auto; display: block; }
+  figcaption { font-size: 14px; color: var(--muted); margin-top: 4px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  @media (max-width: 500px) { main { padding: 18px 16px; } h1 { font-size: 22px; } }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="./">← Zurück zu Form3D</a>
+  <h1>Tipps für den 3D-Druck</h1>
+  <p class="lead">Ein Drucker baut das Teil Schicht für Schicht von unten nach oben auf. Fast alle Regeln folgen daraus:
+    Jede neue Schicht braucht etwas darunter, auf dem sie liegen kann. Wer das beim Modellieren beachtet, braucht kaum Stützmaterial
+    und bekommt maßhaltige, feste Teile.</p>
+  <ul class="toc">
+    <li><a href="#ueberhang">Überhänge &amp; Winkel</a></li>
+    <li><a href="#bruecken">Brücken</a></li>
+    <li><a href="#loecher">Löcher</a></li>
+    <li><a href="#schrauben">Schrauben</a></li>
+    <li><a href="#passungen">Passungen</a></li>
+    <li><a href="#waende">Wände</a></li>
+    <li><a href="#kanten">Kanten</a></li>
+    <li><a href="#lage">Lage &amp; Festigkeit</a></li>
+    <li><a href="#allgemein">Allgemeine Tipps</a></li>
+  </ul>
+
+  <h2 id="ueberhang">Überhänge &amp; Winkel</h2>
+  <p>Eine Wand, die nach außen kippt, ist ein <b>Überhang</b>. Gemessen wird der Winkel gegen die Senkrechte:
+    0° ist eine gerade Wand, 90° eine waagerechte Decke, die frei in der Luft hängt.</p>
+  <figure>
+    <svg viewBox="0 0 560 170" role="img" aria-label="Überhangwinkel 30, 45, 60 und 80 Grad">
+      <line x1="10" y1="150" x2="550" y2="150" stroke="#98a2b3" stroke-width="2"/>
+      <g font-size="15" font-weight="600" text-anchor="middle" font-family="system-ui, sans-serif">
+        <polygon points="30,150 90,150 147,52 87,52" fill="#d1fadf" stroke="#079455" stroke-width="2"/>
+        <text x="90" y="40" fill="#079455">30° sicher</text>
+        <polygon points="170,150 230,150 328,52 268,52" fill="#d1fadf" stroke="#079455" stroke-width="2"/>
+        <text x="250" y="40" fill="#079455">45° sicher</text>
+        <polygon points="350,150 400,150 470,110 420,110" fill="#fef0c7" stroke="#dc6803" stroke-width="2"/>
+        <text x="415" y="96" fill="#dc6803">60° meist gut</text>
+        <polygon points="470,150 500,150 550,141 520,141" fill="#fee4e2" stroke="#d92d20" stroke-width="2"/>
+        <text x="510" y="128" fill="#d92d20">80° Stütze</text>
+      </g>
+    </svg>
+    <figcaption>Winkel gegen die Senkrechte: je flacher die Wand liegt, desto weniger Halt hat die nächste Schicht.</figcaption>
+  </figure>
+  <ul>
+    <li><b>Bis 45°</b> druckt praktisch jeder Drucker sauber, ohne Stützen.</li>
+    <li><b>45° bis 60°</b> funktionieren fast immer ohne Probleme, wenn der Bauteillüfter gut kühlt.
+      Die Unterseite wird nur etwas rauer.</li>
+    <li><b>Über 60°</b> hängen die Schichten durch. Hier braucht es Stützmaterial, oder man ändert die Form.</li>
+    <li>Eine waagerechte Unterseite, die zwischen zwei Auflagen liegt, ist ein Sonderfall: eine <a href="#bruecken">Brücke</a>.</li>
+  </ul>
+  <h3>Überhänge vermeiden, statt sie zu stützen</h3>
+  <ul>
+    <li>Unterseiten von Vorsprüngen mit einer <b>45°-Fase</b> abschrägen, statt sie waagerecht zu lassen.</li>
+    <li>Das Teil so drehen, dass die größte ebene Fläche auf der Platte liegt.</li>
+    <li>Große Überhänge als eigenes Teil drucken und danach verschrauben oder verkleben.</li>
+  </ul>
+  <p class="note app"><b>In Form3D:</b> Die <b>Druckprüfung</b> (Druckersymbol oben rechts) färbt Überhänge rot. Mit <b>45°/60°</b> stellst du
+    die Grenze ein: 45° für sichere Ergebnisse, 60°, wenn dein Drucker gut kühlt. <b>Beste Lage</b> dreht den Körper so, dass am wenigsten überhängt.</p>
+
+  <h2 id="bruecken">Brücken</h2>
+  <p>Eine waagerechte Fläche, die an <b>beiden</b> Enden aufliegt, spannt der Drucker wie ein Seil. Kurze Brücken bis etwa 10–20 mm
+    gelingen meist ohne Stütze. Die erste Schicht darüber hängt etwas durch, die nächsten werden wieder glatt.</p>
+  <ul>
+    <li>Brücken möglichst kurz halten und quer zur kürzeren Seite legen.</li>
+    <li>Eine Decke mit einer Kante, die frei endet, ist keine Brücke, sondern ein Überhang von 90°.</li>
+  </ul>
+
+  <h2 id="loecher">Löcher</h2>
+  <ul>
+    <li><b>Senkrechte Löcher</b> (Achse nach oben) werden rund, fallen aber oft etwas <b>kleiner</b> aus als gezeichnet:
+      typisch 0,1–0,3 mm im Durchmesser. Deshalb gibt es die <a href="#passungen">Passungen</a>.</li>
+    <li><b>Waagerechte Löcher</b> haben oben einen Überhang. Bis etwa 6–8 mm Durchmesser ist das kein Problem.
+      Größere Löcher oben spitz zulaufen lassen (Tropfenform, 45° Dach). Dann druckt die Oberseite sauber.</li>
+    <li>Löcher unter 1 mm schließen sich oft ganz. Die Druckprüfung markiert sie violett.</li>
+  </ul>
+
+  <h2 id="schrauben">Schrauben</h2>
+  <h3>Die Schraube schneidet ihr Gewinde selbst</h3>
+  <p>Für die meisten gedruckten Teile ist das die einfachste und stärkste Lösung: Man druckt ein Loch mit dem
+    <b>Kerndurchmesser&nbsp;= Nenngröße&nbsp;− Steigung</b> und dreht eine normale metrische Schraube direkt hinein.
+    Sie formt ihr Gewinde in den Kunststoff und hält erstaunlich gut. Es braucht keine Mutter und keinen Gewindeschneider.</p>
+  <div class="scroll"><table>
+    <tr><th>Größe</th><th>Steigung</th><th>Kernloch (d − P)</th><th>Durchgangsloch</th></tr>
+    <tr><td>M2</td><td>0,4</td><td><b>1,6</b></td><td>2,4</td></tr>
+    <tr><td>M2,5</td><td>0,45</td><td><b>2,05</b></td><td>2,9</td></tr>
+    <tr><td>M3</td><td>0,5</td><td><b>2,5</b></td><td>3,4</td></tr>
+    <tr><td>M4</td><td>0,7</td><td><b>3,3</b></td><td>4,5</td></tr>
+    <tr><td>M5</td><td>0,8</td><td><b>4,2</b></td><td>5,5</td></tr>
+    <tr><td>M6</td><td>1</td><td><b>5</b></td><td>6,6</td></tr>
+    <tr><td>M8</td><td>1,25</td><td><b>6,75</b></td><td>9</td></tr>
+    <tr><td>M10</td><td>1,5</td><td><b>8,5</b></td><td>11</td></tr>
+    <tr><td>M12</td><td>1,75</td><td><b>10,25</b></td><td>13,5</td></tr>
+  </table></div>
+  <p class="muted">Alle Maße in mm. Durchgangsloch nach ISO 273, Reihe „mittel“.</p>
+  <ul>
+    <li><b>Einschraubtiefe</b> mindestens 2 × Nenngröße, also bei M3 rund 6 mm. Mehr hält kaum besser.</li>
+    <li>Rund um das Kernloch genug Material lassen: mindestens <b>3–4 Umfänge</b> (Perimeter) oder 1,5 mm Wand.
+      Sonst platzt das Teil beim Eindrehen auf.</li>
+    <li>Senkrecht gedruckte Löcher (Achse in Druckrichtung) halten am besten. Die Schichten liegen dann quer zur Zugkraft der Schraube.</li>
+    <li>Die Schraube beim ersten Mal langsam eindrehen. Ein Tropfen Wärme (Föhn) hilft bei PETG und ABS.</li>
+    <li>Wird die Schraube oft gelöst, ist eine <b>Mutternfalle</b> oder ein <b>Gewindeeinsatz</b> (zum Einschmelzen) haltbarer.</li>
+  </ul>
+  <h3>Durchgangsloch, Mutter und gedrucktes Gewinde</h3>
+  <ul>
+    <li><b>Durchgang</b>: Das Loch ist größer als die Schraube. Sie hält erst im Gegenstück, in einer Mutter oder einem Kernloch.</li>
+    <li><b>Mutternfalle</b>: Sechskanttasche, in die eine Mutter eingelegt wird. Sie kann sich nicht mitdrehen.</li>
+    <li><b>Gedruckte Gewinde</b> lohnen sich ab etwa <b>M6</b>. Feinere Gewinde werden vom Drucker zu ungenau.
+      Gewinde am besten senkrecht drucken.</li>
+  </ul>
+  <p class="note app"><b>In Form3D:</b> Druckteile → <b>Schraube</b>, Körperfläche antippen. <b>Kernloch</b> erzeugt das Loch d − P zum
+    direkten Einschrauben, <b>Durchgang</b> das lose Loch. Die <b>Schraubenlänge</b> ist die Länge auf der Packung: beim Senkkopf mit Kopf,
+    beim Zylinderkopf ohne Kopf. Unter der Spitze bleiben 0,5 mm Luft.</p>
+
+  <h2 id="passungen">Passungen</h2>
+  <p>Zwei gedruckte Teile, die genau gleich groß gezeichnet sind, passen <b>nicht</b> ineinander. Der Drucker trägt an den Außenkanten etwas
+    mehr auf, und Löcher werden etwas kleiner. Deshalb braucht jede Verbindung ein Spiel:</p>
+  <div class="scroll"><table>
+    <tr><th>Passung</th><th>Spiel je Seite</th><th>Wofür</th></tr>
+    <tr><td>Press</td><td>0,05 mm</td><td>Hält ohne Kleber, mit Kraft gefügt</td></tr>
+    <tr><td>Steck</td><td>0,15 mm</td><td>Stecken, lösen, wieder stecken</td></tr>
+    <tr><td>Spiel</td><td>0,3 mm</td><td>Dreht oder gleitet frei, Scharniere, Deckel</td></tr>
+  </table></div>
+  <p>Jeder Drucker ist etwas anders. Am besten zuerst ein kleines Probestück drucken, zum Beispiel einen Zapfen und ein Loch, und dann die Passung wählen.</p>
+  <p class="note app"><b>In Form3D:</b> Beim Extrudieren in der Leiste <b>Passung</b> wählen. Löcher und Taschen werden automatisch um das Spiel größer,
+    Zapfen kleiner.</p>
+
+  <h2 id="waende">Wände</h2>
+  <ul>
+    <li>Wanddicken als <b>Vielfaches der Düsenbreite</b> planen. Bei der üblichen 0,4-mm-Düse sind das 0,8 / 1,2 / 1,6 mm.
+      Zwischenmaße füllt der Slicer schlecht.</li>
+    <li><b>Mindestens 0,8 mm</b>. Wände, die etwas tragen oder in die geschraubt wird, eher 1,6–2,4 mm.</li>
+    <li>Details unter 0,4 mm (Düsenbreite) druckt der Drucker gar nicht.</li>
+    <li>Massive Teile sind selten nötig. Wände plus 15–25 % Füllung (im Slicer) reichen für die meisten Zwecke.</li>
+  </ul>
+  <p class="note app"><b>In Form3D:</b> Die Druckprüfung färbt Wände unter 0,8 mm orange.</p>
+
+  <h2 id="kanten">Kanten: unten Fase, oben Rundung</h2>
+  <ul>
+    <li><b>Unten</b> auf der Druckplatte wird die erste Schicht breitgedrückt: der „Elefantenfuß“. Eine kleine <b>Fase</b> (0,4–0,8 mm)
+      gleicht das aus. Eine Rundung wäre hier falsch, ihr unteres Ende ist ein flacher Überhang.</li>
+    <li><b>Oben</b> und an senkrechten Kanten sind <b>Rundungen</b> ideal. Sie fühlen sich gut an und brechen nicht ab.</li>
+    <li><b>Innenecken</b> runden. Scharfe Innenecken sind Sollbruchstellen, schon 1 mm Radius macht das Teil deutlich fester.</li>
+  </ul>
+  <p class="note app"><b>In Form3D:</b> Körper wählen → <b>Druckkanten</b> setzt mit einem Tipp unten eine Fase und oben Rundungen.</p>
+
+  <h2 id="lage">Lage &amp; Festigkeit</h2>
+  <ul>
+    <li>Ein gedrucktes Teil ist <b>zwischen den Schichten am schwächsten</b>. Es bricht leichter, wenn man an den Schichten zieht,
+      als wenn man entlang der Schichten zieht.</li>
+    <li>Das Teil so drehen, dass die Hauptlast <b>entlang der Schichten</b> läuft. Ein Haken wird z. B. liegend gedruckt, nicht stehend.</li>
+    <li>Die größte ebene Fläche nach unten legen: Sie haftet gut und braucht keine Stützen.</li>
+    <li>Wichtige Sichtflächen nach oben oder zur Seite legen. Die Unterseite von Überhängen wird immer etwas rau.</li>
+  </ul>
+
+  <h2 id="allgemein">Allgemeine Tipps</h2>
+  <ul>
+    <li><b>Klein anfangen:</b> Eine kritische Stelle (Gewinde, Passung, Schnappverbindung) erst als kleines Probestück drucken.</li>
+    <li><b>Große Teile teilen</b> und mit Zapfen, Schrauben oder Schwalbenschwanz verbinden. Das spart Stützmaterial und Fehldrucke.</li>
+    <li><b>Schrumpf:</b> ABS und ASA schrumpfen merklich, PLA und PETG kaum. Lange, flache Teile aus ABS verziehen sich leicht. Rundungen an den Ecken helfen.</li>
+    <li><b>Text und feine Details</b> mindestens 0,6 mm erhaben oder vertieft und 1 mm breit, sonst verschwinden sie.</li>
+    <li><b>Abstände zwischen Teilen</b>, die sich bewegen sollen, mindestens 0,3 mm. Sonst verschmelzen sie beim Druck.</li>
+    <li><b>Als 3MF exportieren:</b> Die Datei enthält Einheit, Namen und Farben. Der Slicer liest sie ohne Rückfrage in Millimetern.</li>
+  </ul>
+  <p class="muted">Alle Werte sind Erfahrungswerte für FDM-Drucker mit 0,4-mm-Düse und 0,2-mm-Schichten. Dein Drucker und Material können abweichen.</p>
+  <p><a class="back" href="./">← Zurück zu Form3D</a></p>
+</main>
+</body>
+</html>

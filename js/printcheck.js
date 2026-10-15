@@ -3,7 +3,12 @@
 export const OVER = 1, THIN = 2, GAP = 4;
 export const LIMITS = { overhang: 45, wall: 0.8, gap: 1.0 }; // Grad gegen die Senkrechte, mm, mm
 
-const cache = new WeakMap(), orient = new WeakMap();
+let cache = new WeakMap(), orient = new WeakMap();
+// Überhanggrenze: 45° ist fast immer sicher, bis 60° geht es mit guter Lüfterkühlung meist auch
+export function setOverhang(deg) {
+  LIMITS.overhang = deg;
+  cache = new WeakMap(); orient = new WeakMap();
+}
 
 // Raster über die Dreiecke für kurze Strahlen (Wand-/Spaltdicke)
 function triGrid(v, t, cell) {

@@ -200,11 +200,12 @@ export function showHelp(device = 'tablet', onDevice) {
         <li><b>Fläche zweimal antippen</b> – ganzen Körper wählen und gleich verschieben/drehen, weitere Körper dazutippen</li>
         <li>Unten erscheinen Bewegen, Vereinigen, Abziehen, Farbe, Löschen</li></ul></div>
       <div><h3>3D-Druck</h3><ul>
-        <li><b>Druckprüfung</b> (Drucker oben rechts): rot Überhänge über 45°, orange Wände unter 0,8 mm, violett Spalte/Löcher unter 1 mm; <b>Beste Lage</b> legt den Körper mit wenig Überhang auf</li>
+        <li><b>Druckprüfung</b> (Drucker oben rechts): rot Überhänge über 45° (oder 60°, umschaltbar), orange Wände unter 0,8 mm, violett Spalte/Löcher unter 1 mm; <b>Beste Lage</b> legt den Körper mit wenig Überhang auf</li>
         <li>Körper wählen → <b>Druckkanten</b>: unten Fase (kein Elefantenfuß, kein Überhang), oben Rundung – beide Maße einstellbar</li>
         <li>Beim Extrudieren <b>Passung</b> wählen: Press 0,05 · Steck 0,15 · Spiel 0,3 mm je Seite – Löcher werden größer, Zapfen kleiner</li>
-        <li><b>Druckteile</b> links: Schraubenloch (Senkkopf, Zylinderkopf), Mutternfalle, Gewinde (innen oder Bolzen) M2–M12 – Körperfläche antippen, Größe und Tiefe unten wählen</li>
-        <li>Menü → <b>An Slicer senden (3MF)</b> öffnet das Teilen-Menü (z. B. Bambu Handy, Prusa); Export auch als 3MF, STL, OBJ</li></ul></div>
+        <li><b>Druckteile</b> links: Schraubenloch (Senkkopf, Zylinderkopf; <b>Kernloch</b> d − P zum direkten Einschrauben oder Durchgang), Mutternfalle, Gewinde (innen oder Bolzen) M2–M12 – Körperfläche antippen, Größe und Länge unten wählen</li>
+        <li>Menü → <b>An Slicer senden (3MF)</b> öffnet das Teilen-Menü (z. B. Bambu Handy, Prusa); Export auch als 3MF, STL, OBJ</li>
+        <li>Menü → <b><a href="tipps.html">Tipps für den 3D-Druck</a></b>: Winkel, Schrauben, Passungen, Wände, Festigkeit</li></ul></div>
       <div><h3>Fehler melden</h3><ul>
         <li>Menü → <b>Fehler aufzeichnen</b>, Fehler nachstellen, <b>Hier!</b> im richtigen Moment, dann <b>Fertig</b></li>
         <li>Die Datei mit kurzer Beschreibung teilen oder sichern und weitergeben</li></ul></div>` }),
