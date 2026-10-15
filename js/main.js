@@ -4,7 +4,7 @@ import { Viewport } from './viewport.js';
 import * as K from './kernel.js';
 import * as S from './sketch.js';
 import { analyze, faceTriangles, faceCentroid, faceLoops, smoothSurface } from './meshview.js';
-import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains, restoredChains } from './edges.js';
+import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains, restoredChains, isConvex } from './edges.js';
 import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
@@ -1051,7 +1051,10 @@ function renderBar() {
       const names = { l: 'Länge', b: 'Breite', h: 'Höhe', d: 'Durchmesser' };
       for (const k of Object.keys(o.vals)) F(names[k], o.vals[k], 'mm', v => { if (v > 0) { o.vals[k] = v; refreshOp(); } });
     }
-    if (o.type === 'edge') {
+    if (o.print) {
+      F('Fase unten', o.bottom, 'mm', v => { if (v >= 0) { o.bottom = v; refreshOp(); } });
+      F('Rundung oben', o.top, 'mm', v => { if (v >= 0) { o.top = v; refreshOp(); } });
+    } else if (o.type === 'edge') {
       items.push({ type: 'seg', value: o.kind, options: [['fillet', 'Verrundung'], ['chamfer', 'Fase']], onChange: k => { o.kind = k; sync(); refreshOp(); } });
       F(o.kind === 'fillet' ? 'Radius' : 'Abstand', o.size, 'mm', v => { if (v > 0) { o.size = v; refreshOp(); } });
     }
@@ -1094,6 +1097,7 @@ function renderBar() {
     L(`${UI.fmt(sz.x)} × ${UI.fmt(sz.y)} × ${UI.fmt(sz.z)} mm`, true);
     sep();
     B('Bewegen', 'move', () => startTransform());
+    if (sel.bodies.length === 1) B('Druckkanten', 'chamfer', () => startPrintEdges(sel.bodies[0]));
     B('Kopie', 'copy', duplicate);
     if (sel.bodies.length > 1) {
       B('Vereinigen', 'union', () => doBoolean('union'));
@@ -1160,6 +1164,40 @@ function edgeTools(b, picked, kind, size) {
   const ext = tangentChains(b.mesh, picked);
   if (ext.length > picked.length) try { return make(ext); } catch (e) { if (!/Radius zu groß/.test(e.message)) throw e; }
   return make(picked);
+}
+
+// Druckkanten: unten (auf der Druckplatte) Fase gegen den Elefantenfuß – sie erzeugt keinen Überhang –,
+// oben an waagerechten Außenkanten nach oben zeigender Flächen eine Rundung
+function printEdges(mesh) {
+  const { fn } = analyze(mesh), all = edgeChains(mesh);
+  let z0 = Infinity;
+  for (let i = 2; i < mesh.v.length; i += 3) z0 = Math.min(z0, mesh.v[i]);
+  const flat = c => c.pts.every(p => Math.abs(p[2] - c.pts[0][2]) < 0.01);
+  const up = c => c.segs.some(g => fn[3 * g.t1 + 2] > 0.999 || fn[3 * g.t2 + 2] > 0.999);
+  const convex = all.filter(c => isConvex(mesh, c));
+  return {
+    bottom: convex.filter(c => flat(c) && Math.abs(c.pts[0][2] - z0) < 0.01),
+    top: convex.filter(c => flat(c) && c.pts[0][2] > z0 + 0.01 && up(c)),
+  };
+}
+function startPrintEdges(bodyId) {
+  const b = body(bodyId), { bottom, top } = printEdges(b.mesh);
+  if (!bottom.length && !top.length) return UI.toast('Keine passenden Kanten gefunden');
+  const o = {
+    type: 'edge', print: true, title: 'Druckkanten', bodyId, bottom: 0.6, top: 1, convex: true,
+    tools() {
+      const t1 = this.bottom > 0 && bottom.length ? edgeTools(b, bottom, 'chamfer', this.bottom) : [];
+      const b2 = { ...b, features: [...(b.features || []), ...t1.map(t => ({ tag: t.tag }))] };
+      return [...t1, ...(this.top > 0 && top.length ? edgeTools(b2, top, 'fillet', this.top) : [])];
+    },
+    build() { const ts = this.tools(); this.convex = ts.some(t => t.convex); return ts.length ? K.unionAll(ts.map(K.toolMesh)) : null; },
+    result() { return K.blendFeatures(b.mesh, this.tools()); },
+  };
+  stopTransform();
+  st.op = o;
+  sync();
+  refreshOp();
+  UI.toast(`${bottom.length} Kante${bottom.length === 1 ? '' : 'n'} unten, ${top.length} oben`);
 }
 
 function startEdgeOp(kind, opts = {}) {

@@ -345,6 +345,21 @@ try {
     click('#btn-check');
     log(shown && document.getElementById('check').hidden, 'Druckprüfung ein/aus: Leiste und Markierung ' + (shown ? 'sichtbar' : 'fehlen'));
   }
+  // Druckkanten: Würfel wählen → unten Fase 0,6, oben Rundung 1 an je vier Kanten, ein Schritt, ohne Überhang
+  {
+    const box = K.primitive('box', { l: 20, b: 20, h: 10 }), id = 9001;
+    doc.bodies.push({ id, name: 'Druckwürfel', color: '#a9b4c4', visible: true, mesh: box });
+    window.form3d.sync();
+    sel.bodies = [id]; window.form3d.sync();
+    [...document.querySelectorAll('#bar .btn')].find(b => b.title === 'Druckkanten')?.click();
+    const op = st.op?.print ? { b: st.op.bottom, t: st.op.top } : null;
+    applyOp();
+    const nb = doc.bodies.find(b => b.id === id), dv = 4000 - K.props(nb.mesh).volume, c = checkPrint(nb.mesh);
+    const kinds = (nb.features || []).map(f => f.kind).sort().join();
+    log(op?.b === 0.6 && op?.t === 1 && dv > 25 && dv < 33 && c.over < 0.01 && kinds === 'chamfer,chamfer,chamfer,chamfer,fillet,fillet,fillet,fillet',
+      `Druckkanten: ${JSON.stringify(op)}, −${dv.toFixed(1)} mm³ (Soll ~31), Überhang ${c.over.toFixed(2)} mm², ${kinds}`);
+    doc.bodies = doc.bodies.filter(b => b.id !== id); window.form3d.sync();
+  }
   // 3MF: ZIP-Verzeichnis lesen, Prüfsumme und Modell (Punkte/Dreiecke je Körper) wie ein Slicer prüfen
   {
     const z = export3MF(doc.bodies), dv = new DataView(z.buffer), dec = new TextDecoder(), files = {};

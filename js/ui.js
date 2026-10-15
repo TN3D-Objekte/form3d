@@ -197,6 +197,7 @@ export function showHelp(device = 'tablet', onDevice) {
         <li>Unten erscheinen Bewegen, Vereinigen, Abziehen, Farbe, Löschen</li></ul></div>
       <div><h3>3D-Druck</h3><ul>
         <li><b>Druckprüfung</b> (Drucker oben rechts): rot Überhänge über 45°, orange Wände unter 0,8 mm, violett Spalte/Löcher unter 1 mm; <b>Beste Lage</b> legt den Körper mit wenig Überhang auf</li>
+        <li>Körper wählen → <b>Druckkanten</b>: unten Fase (kein Elefantenfuß, kein Überhang), oben Rundung – beide Maße einstellbar</li>
         <li>Menü → <b>An Slicer senden (3MF)</b> öffnet das Teilen-Menü (z. B. Bambu Handy, Prusa); Export auch als 3MF, STL, OBJ</li></ul></div>
       <div><h3>Fehler melden</h3><ul>
         <li>Menü → <b>Fehler aufzeichnen</b>, Fehler nachstellen, <b>Hier!</b> im richtigen Moment, dann <b>Fertig</b></li>

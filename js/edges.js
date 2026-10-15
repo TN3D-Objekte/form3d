@@ -143,7 +143,7 @@ export function restoredChains(mesh, before, box) {
   return out;
 }
 
-function isConvex(mesh, chain) {
+export function isConvex(mesh, chain) {
   const { fn, weld } = analyze(mesh), { v, t } = mesh, s0 = chain.segs[0];
   const c2 = [t[3 * s0.t2], t[3 * s0.t2 + 1], t[3 * s0.t2 + 2]].find(i => weld[i] !== s0.u && weld[i] !== s0.v);
   const e = [0, 1, 2].map(k => v[c2 * 3 + k] - v[s0.u * 3 + k]);

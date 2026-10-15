@@ -71,7 +71,7 @@ function overhangOf(v, t, fn, fa, down = [0, 0, -1]) {
   const flags = new Uint8Array(t.length / 3);
   for (let n = 0; n < t.length / 3; n++) {
     const dn = fn[3 * n] * down[0] + fn[3 * n + 1] * down[1] + fn[3 * n + 2] * down[2]; // 1 = zeigt nach unten
-    if (dn <= cosO) continue;
+    if (dn <= cosO + 1e-3) continue; // genau 45° (z. B. Fase) gilt noch als druckbar
     let onBed = true;
     for (let c = 0; c < 3; c++) {
       const i = t[3 * n + c] * 3;
