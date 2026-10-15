@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import { Viewport } from './viewport.js';
 import * as K from './kernel.js';
 import * as S from './sketch.js';
-import { analyze, faceTriangles, faceCentroid, faceLoops } from './meshview.js';
-import { edgeChains, buildEdgeTool, cornerTools } from './edges.js';
+import { analyze, faceTriangles, faceCentroid, faceLoops, smoothSurface } from './meshview.js';
+import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains } from './edges.js';
 import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
@@ -135,7 +135,7 @@ function syncHighlights() {
   const bv = sel.face && views.get(sel.face.bodyId);
   if (!bv) return;
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(faceTriangles(bv.an, sel.face.faceIdx), 3));
+  g.setAttribute('position', new THREE.BufferAttribute(faceTriangles(bv.an, sel.face.faces), 3));
   faceHL = new THREE.Mesh(g, faceMat);
   gAux.add(faceHL);
 }
@@ -183,7 +183,7 @@ function sync() {
     if (isDraw(st.tool)) { st.tool = 'select'; vp.tool = selectTool; }
   }
   sel.bodies = sel.bodies.filter(body);
-  if (sel.face && !body(sel.face.bodyId)) sel.face = null;
+  if (sel.face && body(sel.face.bodyId)?.mesh !== sel.face.mesh) sel.face = null;
   sel.edges = sel.edges.filter(x => body(x.bodyId)?.mesh === x.mesh);
   if (sel.con && !visibleSketch(sel.con.sketchId)?.constraints?.some(c => c.id === sel.con.id)) sel.con = null;
   sel.regions = sel.regions.filter(r => sketch(r.sketchId)?.visible);
@@ -192,7 +192,7 @@ function sync() {
   syncBodies();
   syncSketches();
   syncHighlights();
-  st.refs = st.sketchId ? cornersOnPlane(sketch(st.sketchId).plane) : [];
+  st.refs = st.sketchId ? refsOnPlane(sketch(st.sketchId).plane) : [];
   if (st.xf) sel.bodies.length ? resetPivot() : stopTransform();
   vp.scene.updateMatrixWorld(true);
   renderBar();
@@ -223,11 +223,30 @@ function sceneBox() {
   for (const s of doc.sketches) if (s.visible) for (const pl of sketchRt(s).polys) for (const p of pl.pts) box.expandByPoint(p);
   return box;
 }
-function cornersOnPlane(pl) {
-  const out = [];
+// Bezugspunkte der Körper in einer Skizzenebene: Ecken, Kantenmitten, Kreismittelpunkte, Flächenmitten
+function refsOnPlane(pl) {
+  const out = [], on = q => Math.abs(S.planeDist(pl, q)) < 1e-3;
   for (const b of doc.bodies) {
     if (!b.visible) continue;
-    for (const c of analyze(b.mesh).corners) if (Math.abs(S.planeDist(pl, c)) < 1e-3) out.push({ p: S.to2D(pl, c), kind: 'end' });
+    const an = analyze(b.mesh);
+    for (const c of an.corners) if (on(c)) out.push({ p: S.to2D(pl, c), kind: 'end' });
+    for (const ch of edgeChains(b.mesh)) {
+      if (!ch.pts.every(on)) continue;
+      const pts = ch.pts.map(q => S.to2D(pl, q)), a = pts[0], z = pts[pts.length - 1];
+      const len = Math.hypot(z[0] - a[0], z[1] - a[1]);
+      const straight = len > 1e-6 && pts.every(q => Math.abs((q[0] - a[0]) * (z[1] - a[1]) - (q[1] - a[1]) * (z[0] - a[0])) / len < 1e-3);
+      if (straight) out.push({ p: [(a[0] + z[0]) / 2, (a[1] + z[1]) / 2], kind: 'mid' });
+      else if (ch.closed) {
+        const ring = pts.slice(0, -1), c = ring.reduce((s, q) => [s[0] + q[0] / ring.length, s[1] + q[1] / ring.length], [0, 0]);
+        const r = ring.map(q => S.dist2(q, c));
+        if (Math.max(...r) - Math.min(...r) < 0.02 * Math.max(...r)) out.push({ p: c, kind: 'center' });
+      }
+    }
+    an.faces.forEach((f, fi) => {
+      if (Math.abs(f.n[0] * pl.n[0] + f.n[1] * pl.n[1] + f.n[2] * pl.n[2]) < 0.9999 || f.tris.length < 2) return;
+      const c = faceCentroid(an, fi);
+      if (on(c)) out.push({ p: S.to2D(pl, c), kind: 'center' });
+    });
   }
   return out;
 }
@@ -240,7 +259,7 @@ function applySolid(tool, mode, parentId, auto) {
     if (targets.length) {
       let m = tool;
       for (const t of targets) m = K.boolean('union', t.mesh, m);
-      patchBody(targets[0].id, { mesh: m });
+      patchBody(targets[0].id, { mesh: m, features: targets.flatMap(t => t.features || []) });
       removeBodies(targets.slice(1).map(t => t.id));
       return;
     }
@@ -292,7 +311,7 @@ function opFromSelection() {
     if (!regions.length) return null;
     return makeExtrude({ title: 'Extrudieren', regions, plane: s.plane, parentId: s.parent, sketchId: s.id, origin: S.to3D(s.plane, S.regionCenter(regions[0])) });
   }
-  if (sel.face) {
+  if (sel.face && sel.face.faces.length === 1) {
     const b = body(sel.face.bodyId), bv = views.get(b.id);
     const { plane, loops } = faceLoops(b.mesh, bv.an, sel.face.faceIdx);
     if (!loops.length) return null;
@@ -315,12 +334,12 @@ function applyOp() {
   if (!o) return;
   if (o.type === 'edge') {
     try {
-      const m = o.result();
-      if (!m) throw new Error('leeres Ergebnis');
-      patchBody(o.bodyId, { mesh: m });
+      const r = o.result();
+      if (!r.mesh) throw new Error('leeres Ergebnis');
+      patchBody(o.bodyId, { mesh: r.mesh, features: [...(body(o.bodyId).features || []), ...r.features] });
     } catch (e) {
       console.error(e);
-      return UI.toast('Mit diesem Maß nicht möglich – kleineren Wert versuchen');
+      return UI.toast(/Radius zu groß/.test(e.message) ? 'Radius zu groß für diese Kante – kleineren Wert versuchen' : 'Mit diesem Maß nicht möglich – kleineren Wert versuchen');
     }
     st.op = null;
     setPreview(null);
@@ -357,6 +376,13 @@ function cancelOp() {
 }
 
 // ---------------------------------------------------------------- Auswahl
+// Flächenauswahl: ganze glatte Fläche (Rundung, Zylinder) statt einzelner Facetten
+function faceSel(bodyId, faceIdx) {
+  const b = body(bodyId), an = views.get(bodyId).an, faces = smoothSurface(b.mesh, an, faceIdx);
+  const tag = K.tagOf(b.mesh, an.faces[faceIdx].tris[0]), feature = tag ? b.features?.find(f => f.tag === tag) : null;
+  return { bodyId, faceIdx, faces, mesh: b.mesh, feature };
+}
+
 function clearSel() { sel.bodies = []; sel.face = null; sel.regions = []; sel.ents = []; sel.edges = []; sel.con = null; }
 
 function selectionChanged() {
@@ -453,7 +479,7 @@ function pick(e, dbl) {
     if (i >= 0) regs.splice(i, 1); else regs.push({ sketchId: hit.sketchId, idx: hit.idx });
     sel.regions = regs;
   } else {
-    const sameFace = sel.face && sel.face.bodyId === hit.bodyId && sel.face.faceIdx === hit.faceIdx;
+    const sameFace = sel.face && sel.face.bodyId === hit.bodyId && sel.face.faces.includes(hit.faceIdx);
     if (sel.bodies.length || sameFace || dbl) {
       const bodies = sel.bodies.slice(), i = bodies.indexOf(hit.bodyId);
       clearSel();
@@ -461,13 +487,14 @@ function pick(e, dbl) {
       sel.bodies = bodies;
     } else {
       clearSel();
-      sel.face = { bodyId: hit.bodyId, faceIdx: hit.faceIdx };
+      sel.face = faceSel(hit.bodyId, hit.faceIdx);
     }
   }
   selectionChanged();
 }
 
 function deleteSelection() {
+  if (sel.face?.feature) return deleteFeature(sel.face.bodyId, sel.face.feature.tag);
   if (sel.con) {
     const s = sketch(sel.con.sketchId);
     s.constraints = s.constraints.filter(c => c.id !== sel.con.id);
@@ -484,8 +511,23 @@ function deleteSelection() {
   commit();
 }
 
+// Rundung/Fase löschen: Kante wird wieder scharf. Kugelecken, die an der Rundung hängen, gehen mit.
+function deleteFeature(bodyId, tag) {
+  const b = body(bodyId), del = (b.features || []).filter(f => f.tag === tag || f.links?.includes(tag));
+  let m = null;
+  try { m = K.unblend(b.mesh, del, b.features.filter(f => !del.includes(f))); } catch (e) { console.error(e); }
+  if (!m) return UI.toast('Löschen nicht möglich');
+  patchBody(bodyId, { mesh: m, features: b.features.filter(f => !del.includes(f)) });
+  st.op = null;
+  setPreview(null);
+  clearSel();
+  commit();
+}
+
 // ---------------------------------------------------------------- Auswahl-Werkzeug (inkl. Zieh-Pfeil)
 const gridStep = px => [0.1, 0.5, 1, 5, 10, 50, 100].find(s => s >= px * 9) ?? 100;
+vp.gridStep = gridStep;
+vp.onGrid = step => { $('gridchip').innerHTML = `Raster <b>${UI.fmt(step)} mm</b>`; };
 
 // Parameter des Punktes auf der Achse (origin + s·n), der dem Zeigerstrahl am nächsten liegt
 function axisParam(e, origin, n) {
@@ -615,7 +657,8 @@ const pickTool = {
     const hb = rc.intersectObjects(bodyMeshes(), false)[0];
     if (hb && (!hp || hb.distance < hp.distance)) {
       const id = hb.object.userData.bodyId;
-      sel.face = { bodyId: id, faceIdx: views.get(id).an.triFace[hb.faceIndex] };
+      sel.face = faceSel(id, views.get(id).an.triFace[hb.faceIndex]);
+      if (sel.face.faces.length > 1) { sel.face = null; return UI.toast('Skizzen nur auf ebenen Flächen – bitte eine ebene Fläche antippen'); }
       sketchOnFace();
     } else createSketch(S.BASE_PLANES[hp ? hp.object.userData.plane : 'xy'], null); // daneben getippt: Grundebene
     startDraw(st.pendingTool);
@@ -742,7 +785,7 @@ function startDraw(kind) {
   stopTransform();
   st.op = null;
   setPreview(null);
-  if (sel.face) { endSketch(); sketchOnFace(); }
+  if (sel.face?.faces.length === 1) { endSketch(); sketchOnFace(); }
   if (!st.sketchId) {
     clearSel();
     st.pickPlane = true;
@@ -852,11 +895,12 @@ function stopTransform() {
   st.xf = null;
   vp.gizmo.detach();
 }
+const moveFeatures = (b, m16) => b.features?.map(f => ({ ...f, region: K.transform(f.region, m16) }));
 function bake(delta) {
   const ids = sel.bodies.slice();
   doc.bodies = doc.bodies.map(b => {
     const m = ids.includes(b.id) && K.transform(b.mesh, delta.elements);
-    return m ? { ...b, mesh: m } : b;
+    return m ? { ...b, mesh: m, features: moveFeatures(b, delta.elements) } : b;
   });
   commit();
 }
@@ -883,15 +927,16 @@ function doBoolean(op) {
   for (const r of rest) m = m && K.boolean(op, m, r.mesh);
   if (!m) return UI.toast('Das Ergebnis wäre leer');
   removeBodies(rest.map(r => r.id));
-  patchBody(first.id, { mesh: m });
+  patchBody(first.id, { mesh: m, features: op === 'union' ? [first, ...rest].flatMap(b => b.features || []) : first.features });
   sel.bodies = [first.id];
   commit();
 }
 
 function duplicate() {
   sel.bodies = sel.bodies.map(id => {
-    const b = body(id);
-    return addBody(K.transform(b.mesh, new THREE.Matrix4().makeTranslation(10, 10, 0).elements)).id;
+    const b = body(id), m16 = new THREE.Matrix4().makeTranslation(10, 10, 0).elements, c = addBody(K.transform(b.mesh, m16));
+    c.features = moveFeatures(b, m16);
+    return c.id;
   });
   doc.bodies = doc.bodies.map(b => (sel.bodies.includes(b.id) ? { ...b, name: b.name + ' (Kopie)' } : b));
   commit();
@@ -930,6 +975,7 @@ function renderBar() {
     }
     if (o.face) {
       sep();
+      if (sel.face?.feature) B('Löschen', 'trash', deleteSelection, 'danger');
       B('Skizze', 'pencil', () => startDraw('line'));
       B('Körper', 'box', () => { const id = sel.face.bodyId; clearSel(); sel.bodies = [id]; selectionChanged(); });
     }
@@ -970,6 +1016,13 @@ function renderBar() {
     }
     items.push({ type: 'colors', colors: COLORS, value: body(sel.bodies[0]).color, onChange: c => { for (const id of sel.bodies) patchBody(id, { color: c }); commit(); } });
     B('Löschen', 'trash', deleteSelection, 'danger', true);
+  } else if (sel.face) {
+    const f = sel.face.feature;
+    L(f ? (f.kind === 'chamfer' ? 'Fase' : 'Rundung') : 'Gekrümmte Fläche');
+    if (f) L('Löschen macht die Kante wieder scharf', true);
+    sep();
+    B('Körper', 'box', () => { const id = sel.face.bodyId; clearSel(); sel.bodies = [id]; selectionChanged(); });
+    if (f) B('Löschen', 'trash', deleteSelection, 'danger');
   } else if (sel.edges.length) {
     L(sel.edges.length + (sel.edges.length > 1 ? ' Kanten' : ' Kante'));
     L('weitere Kanten dazutippen', true);
@@ -1002,6 +1055,26 @@ function renderBar() {
   UI.renderBar($('bar'), items);
 }
 
+// Neue Kennungen für Rundungs-/Fasenflächen eines Körpers (12 Bit, siehe kernel.js)
+function nextTag(b) {
+  const used = Math.max(K.maxTag(b.mesh), ...(b.features || []).map(f => f.tag));
+  return used + 64 < 4096 ? used + 1 : 1;
+}
+
+// Werkzeuge für Rundung/Fase: tangential anschließende Kanten laufen mit, außer der Radius ist dafür
+// zu groß (dann nur die angetippten Kanten)
+function edgeTools(b, picked, kind, size) {
+  const make = list => {
+    const chains = joinChains(b.mesh, list), base = nextTag(b);
+    const ts = [...chains.map(ch => buildEdgeTool(b.mesh, ch, kind, size)), ...cornerTools(b.mesh, chains, kind, size)];
+    ts.forEach((t, i) => Object.assign(t, { tag: base + i, kind, links: t.chains?.map(ci => base + ci) }));
+    return ts;
+  };
+  const ext = tangentChains(b.mesh, picked);
+  if (ext.length > picked.length) try { return make(ext); } catch (e) { if (!/Radius zu groß/.test(e.message)) throw e; }
+  return make(picked);
+}
+
 function startEdgeOp(kind) {
   if (!sel.edges.length) {
     setSelectTool();
@@ -1011,9 +1084,9 @@ function startEdgeOp(kind) {
   const b = body(sel.edges[0].bodyId), all = edgeChains(b.mesh), picked = sel.edges.map(x => all[x.idx]);
   const o = {
     type: 'edge', title: 'Kanten', kind, size: 2, bodyId: b.id, convex: true,
-    tools() { return [...picked.map(ch => buildEdgeTool(b.mesh, ch, this.kind, this.size)), ...cornerTools(b.mesh, picked, this.kind, this.size)]; },
+    tools() { return edgeTools(b, picked, this.kind, this.size); },
     build() { const ts = this.tools(); this.convex = ts.some(t => t.convex); return K.unionAll(ts.map(K.toolMesh)); },
-    result() { return K.blend(b.mesh, this.tools()); },
+    result() { return K.blendFeatures(b.mesh, this.tools()); },
   };
   stopTransform();
   st.op = o;
@@ -1285,6 +1358,18 @@ vp.onOverlay = ctx => {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+  }
+  if (s) { // Kantenmitten (Dreieck) und Mittelpunkte (Kreuz im Kreis) der Körper in der Skizzenebene
+    ctx.strokeStyle = '#d97706';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (const r of st.refs) {
+      if (r.kind === 'end' || !vp.project(V3(S.to3D(s.plane, r.p)), tv)) continue;
+      const { x, y } = tv;
+      if (r.kind === 'mid') { ctx.moveTo(x, y - 5); ctx.lineTo(x + 5, y + 4); ctx.lineTo(x - 5, y + 4); ctx.closePath(); }
+      else { ctx.moveTo(x + 5, y); ctx.arc(x, y, 5, 0, 7); ctx.moveTo(x - 8, y); ctx.lineTo(x + 8, y); ctx.moveTo(x, y - 8); ctx.lineTo(x, y + 8); }
+    }
+    ctx.stroke();
   }
   const pv = s && drawTool && isDraw(st.tool) && drawTool.preview();
   if (!pv) return;

@@ -138,6 +138,13 @@ button:disabled { opacity: 0.32; cursor: default; }
 .help-foot { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
 .help-foot a { color: var(--muted); }
 
+#gridchip {
+  position: fixed; left: var(--left); bottom: var(--bottom); z-index: 2; pointer-events: none;
+  background: var(--surface); box-shadow: var(--shadow); border-radius: 999px; padding: 6px 12px;
+  font-size: 13px; font-weight: 600; color: var(--muted); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+#gridchip b { color: var(--text); font-weight: 650; }
+
 #loading { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: var(--bg); font-weight: 600; color: var(--muted); padding: 24px; text-align: center; }
 
 @media (max-width: 760px) {

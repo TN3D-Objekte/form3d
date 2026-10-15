@@ -34,7 +34,7 @@ export function analyze(mesh) {
   const par = new Int32Array(nT);
   for (let i = 0; i < nT; i++) par[i] = i;
   const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
-  const open = new Map(), sharp = [], sharpTri = [];
+  const open = new Map(), sharp = [], sharpTri = [], smooth = [];
   for (let i = 0; i < nT; i++) for (let e = 0; e < 3; e++) {
     if (!fa[i]) break;
     const a = weld[t[3 * i + e]], b = weld[t[3 * i + (e + 1) % 3]];
@@ -45,6 +45,7 @@ export function analyze(mesh) {
     const d = fdot(i, j);
     if (d > 0.99999) par[find(i)] = find(j);
     else if (d < COS_EDGE) { sharp.push(a, b); sharpTri.push(i, j); } // Dreieck i enthält die Halbkante a→b
+    else smooth.push(i, j);
   }
 
   const triFace = new Int32Array(nT), faces = [], rootIdx = new Map();
@@ -83,12 +84,37 @@ export function analyze(mesh) {
   for (let k = 0; k < sharp.length; k++) edges.set(v.subarray(sharp[k] * 3, sharp[k] * 3 + 3), k * 3);
   const corners = [...cornerSet].map(i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]]);
 
-  an = { pos, nor, edges, triFace, faces, corners, fa, fn, sharp, sharpTri, weld };
+  an = { pos, nor, edges, triFace, faces, corners, fa, fn, sharp, sharpTri, weld, smooth };
   cacheMap.set(mesh, an);
   return an;
 }
 
+// Zusammenhängende glatte Fläche (z. B. Zylindermantel, Rundung) um die ebene Teilfläche fi: über
+// nicht scharfe Kanten verbunden und mit gleicher Rundungs-/Fasenkennung (mesh.f, obere 12 Bit)
+export function smoothSurface(mesh, an, fi) {
+  const tag = ti => (mesh.f ? Math.floor(mesh.f[ti] / 1048576) : 0), t0 = tag(an.faces[fi].tris[0]);
+  if (!an.nbr) {
+    an.nbr = an.faces.map(() => []);
+    for (let k = 0; k < an.smooth.length; k += 2) {
+      const a = an.triFace[an.smooth[k]], b = an.triFace[an.smooth[k + 1]];
+      if (a !== b) { an.nbr[a].push(b); an.nbr[b].push(a); }
+    }
+  }
+  const seen = new Set([fi]), todo = [fi];
+  while (todo.length) for (const g of an.nbr[todo.pop()]) {
+    if (seen.has(g) || tag(an.faces[g].tris[0]) !== t0) continue;
+    seen.add(g); todo.push(g);
+  }
+  return [...seen];
+}
+
 export function faceTriangles(an, fi) {
+  if (Array.isArray(fi)) {
+    const parts = fi.map(f => faceTriangles(an, f)), out = new Float32Array(parts.reduce((s, p) => s + p.length, 0));
+    let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  }
   const tris = an.faces[fi].tris, out = new Float32Array(tris.length * 9);
   tris.forEach((ti, k) => out.set(an.pos.subarray(ti * 9, ti * 9 + 9), k * 9));
   return out;

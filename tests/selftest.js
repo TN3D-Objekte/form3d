@@ -143,6 +143,19 @@ try {
   const dE = vE - K.props(doc.bodies[1].mesh).volume;
   log(Math.abs(dE - 180) < 2, `Fase 3 mm an 40-mm-Kante: -${dE.toFixed(1)} (Soll 180)`);
 
+  // Fasenfläche antippen → als Fase erkannt, Löschen macht die Kante wieder scharf, Rückgängig stellt sie her
+  const view0 = { t: vp.view.target.clone(), d: vp.view.dist };
+  vp.view.target.set(80, -58.5, 10.5); vp.view.dist = 70; vp.render();
+  tap(...scr(80, -58.5, 10.5));
+  vp.view.target.copy(view0.t); vp.view.dist = view0.d; vp.render();
+  log(sel.face?.feature?.kind === 'chamfer', 'Fasenfläche gewählt: ' + sel.face?.feature?.kind);
+  [...document.querySelectorAll('#bar .btn')].find(b => b.title === 'Löschen')?.click();
+  const vDel = K.props(doc.bodies[1].mesh).volume;
+  log(Math.abs(vDel - vE) < 0.5 && !doc.bodies[1].features?.length, `Fase gelöscht: V ${vDel.toFixed(1)} (Soll ${vE.toFixed(1)})`);
+  document.getElementById('btn-undo').click();
+  await wait(50);
+  log(doc.bodies[1].features?.length === 1 && Math.abs(vE - K.props(doc.bodies[1].mesh).volume - 180) < 2, 'Rückgängig: Fase wieder da');
+
   // Verrundung/Fase am Kern prüfen
   const volOf = m => K.props(m).volume;
   const blendV = (m, pick, kind, size) => volOf(K.blend(m, edgeChains(m).filter(pick).map(ch => buildEdgeTool(m, ch, kind, size))));
@@ -184,6 +197,10 @@ try {
   const pIn = ch => ch.pts.every(p => Math.abs(p[0]) < 20.01 && Math.abs(p[1]) < 15.01 && p[2] > 9.99) && !ch.pts.every(p => p[2] > 29.99);
   const vPk = volOf(filletAll(pocket, pIn, 4)), wantPk = 90000 - rbox(40, 30, 40, 4) / 2;
   log(Math.abs(vPk - wantPk) < 0.002 * wantPk, `Tasche, Innenecken R4: V ${vPk.toFixed(0)} (Soll ${wantPk.toFixed(0)})`);
+  // Nach Verrundung der Oberkante wählt Antippen der senkrechten Kante nur diese (nicht den Bogen dahinter)
+  const tf = K.blend(bx, edgeChains(bx).filter(ch => !vertical(ch) && ch.pts.every(p => p[2] > 29.9 && p[1] < -24.9)).map(ch => buildEdgeTool(bx, ch, 'fillet', 2)));
+  const vc = edgeChains(tf).filter(ch => vertical(ch) && ch.pts.some(p => Math.abs(p[0] - 25) < 1e-3 && Math.abs(p[1] + 25) < 1e-3 && p[2] < 1));
+  log(vc.length === 1 && vc[0].segs.length === 1, `Senkrechte Kante nach oberer Rundung einzeln: ${vc.map(c => c.segs.length)} Segment(e)`);
   const genus = m => (2 - new Set(m.t).size + m.t.length / 6) / 2;
   const cub = shift(K.primitive('box', { l: 50, b: 50, h: 50 })), topF = analyze(cub).faces.findIndex(f => f.n[2] > 0.999);
   const { plane: tp, loops: tLoops } = faceLoops(cub, analyze(cub), topF);
@@ -207,12 +224,14 @@ try {
   log(doc.bodies.length === n0 + 1 && Math.abs(vb - wantB) < 120, `Abziehen: V ${vb.toFixed(0)} (Soll ~${wantB.toFixed(0)})`);
 
   // Datei speichern/öffnen und STL
-  const before = doc.bodies.map(b => K.props(b.mesh).volume.toFixed(1)).join();
+  const before = doc.bodies.map(b => K.props(b.mesh).volume.toFixed(1)).join(), featsBefore = doc.bodies.map(b => b.features?.length || 0).join();
   const stl = exportSTL(doc.bodies), tris = doc.bodies.reduce((a, b) => a + b.mesh.t.length / 3, 0);
   log(stl.byteLength === 84 + 50 * tris, 'STL: ' + tris + ' Dreiecke, ' + stl.byteLength + ' Bytes');
   fromFile(toFile());
   const after = doc.bodies.map(b => K.props(b.mesh).volume.toFixed(1)).join();
   log(before === after && doc.sketches.length === 2, 'Projektdatei-Rundlauf: ' + after);
+  const fb = doc.bodies[1], vUn = K.props(K.unblend(fb.mesh, fb.features)).volume;
+  log(doc.bodies.map(b => b.features?.length || 0).join() === featsBefore && K.maxTag(fb.mesh) > 0 && Math.abs(vUn - vE) < 0.5, `Rundlauf erhält Fase (löschbar): ${featsBefore}, V ohne Fase ${vUn.toFixed(1)}`);
 
   // Zeichnen per Finger (ohne Pencil): Linienzug aus Tipps, geschlossen
   click('[data-tool=line]');

@@ -3,8 +3,10 @@
 import { analyze } from './meshview.js';
 
 const COS_BEND = Math.cos(30 * Math.PI / 180);
+const COS_STRAIGHT = Math.cos(1 * Math.PI / 180);
 const EPS = 0.02; // Überstand des Werkzeugs über die Körperflächen hinaus
 const GAP = 1e-3; // Abstand der Werkzeugenden von Endflächen, an denen nicht verlängert werden kann
+const GROW = 0.01; // Versatz des Löschvolumens, siehe edgeTool
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b, s = 1) => [a[0] + b[0] * s, a[1] + b[1] * s, a[2] + b[2] * s];
@@ -29,12 +31,17 @@ export function edgeChains(mesh) {
     : { s, u: sharp[2 * s + 1], v: sharp[2 * s], t1: sharpTri[2 * s + 1], t2: sharpTri[2 * s] });
   const far = (s, at) => (sharp[2 * s] === at ? sharp[2 * s + 1] : sharp[2 * s]);
   const used = new Uint8Array(nS);
-  // Fortsetzung über einen Punkt nur, wenn dort genau zwei Kanten zusammentreffen und kein Knick vorliegt
+  const len = s => Math.hypot(...sub(P(sharp[2 * s + 1]), P(sharp[2 * s])));
+  // Fortsetzung über einen Punkt nur, wenn dort genau zwei Kanten zusammentreffen und kein Knick vorliegt.
+  // Gerade Stücke und Bögen bleiben getrennt (tangentialer Übergang: Richtung ändert sich, Längen
+  // sehr verschieden), damit ein Antippen nur die gemeinte Kante wählt.
   const next = (s, at, d) => {
     const l = inc.get(at);
     if (l.length !== 2) return -1;
-    const o = l[0] === s ? l[1] : l[0];
-    return !used[o] && dot(d, dir(at, far(o, at))) > COS_BEND ? o : -1;
+    const o = l[0] === s ? l[1] : l[0], c = dot(d, dir(at, far(o, at)));
+    if (used[o] || c <= COS_BEND) return -1;
+    const r = len(s) / len(o);
+    return c > COS_STRAIGHT || (r < 4 && r > 0.25) ? o : -1;
   };
 
   const chains = [];
@@ -62,6 +69,58 @@ export function edgeChains(mesh) {
   return chains;
 }
 
+const flip = c => ({ ...c, segs: c.segs.slice().reverse().map(g => ({ s: g.s, u: g.v, v: g.u, t1: g.t2, t2: g.t1 })), pts: c.pts.slice().reverse() });
+
+// Gewählte Kanten, die tangential aneinander anschließen, zu einer Kette verbinden (z. B. gerade
+// Kante + Bogen + gerade Kante rund um eine verrundete Ecke), damit das Werkzeug durchläuft.
+export function joinChains(mesh, chains) {
+  const v = mesh.v, P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
+  const d = (g) => norm(sub(P(g.v), P(g.u)));
+  let list = chains.filter(c => !c.closed);
+  const done = chains.filter(c => c.closed);
+  for (let joined = true; joined;) {
+    joined = false;
+    outer: for (let i = 0; i < list.length; i++) for (let j = 0; j < list.length; j++) {
+      if (i === j) continue;
+      for (const a of [list[i], flip(list[i])]) {
+        let b = list[j];
+        const ae = a.segs[a.segs.length - 1].v;
+        if (b.segs[b.segs.length - 1].v === ae) b = flip(b);
+        if (b.segs[0].u !== ae || dot(d(a.segs[a.segs.length - 1]), d(b.segs[0])) <= COS_BEND) continue;
+        const segs = [...a.segs, ...b.segs], f = segs[0], l = segs[segs.length - 1];
+        const c = { segs, pts: [...a.pts, ...b.pts.slice(1)], closed: l.v === f.u && dot(d(l), d(f)) > COS_BEND };
+        list = list.filter((_, k) => k !== i && k !== j);
+        (c.closed ? done : list).push(c);
+        joined = true;
+        break outer;
+      }
+    }
+  }
+  return [...done, ...list];
+}
+
+// Gewählte Kanten um tangential anschließende Kanten erweitern (Tangentialkette)
+export function tangentChains(mesh, picked) {
+  const all = edgeChains(mesh), { sharp } = analyze(mesh), v = mesh.v, P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
+  const deg = new Map();
+  for (const i of sharp) deg.set(i, (deg.get(i) || 0) + 1);
+  const ends = c => [[c.segs[0].u, norm(sub(P(c.segs[0].u), P(c.segs[0].v)))], [c.segs[c.segs.length - 1].v, norm(sub(P(c.segs[c.segs.length - 1].v), P(c.segs[c.segs.length - 1].u)))]];
+  const out = new Set(picked), todo = [...picked];
+  while (todo.length) {
+    const c = todo.pop();
+    if (c.closed) continue;
+    for (const [vi, d] of ends(c)) {
+      if (deg.get(vi) !== 2) continue;
+      for (const o of all) {
+        if (out.has(o) || o.closed) continue;
+        const e = ends(o).find(x => x[0] === vi);
+        if (e && dot(d, e[1]) < -COS_BEND) { out.add(o); todo.push(o); }
+      }
+    }
+  }
+  return [...out];
+}
+
 function isConvex(mesh, chain) {
   const { fn, weld } = analyze(mesh), { v, t } = mesh, s0 = chain.segs[0];
   const c2 = [t[3 * s0.t2], t[3 * s0.t2 + 1], t[3 * s0.t2 + 2]].find(i => weld[i] !== s0.u && weld[i] !== s0.v);
@@ -72,6 +131,13 @@ function isConvex(mesh, chain) {
 // Werkzeugkörper für eine Kante. Konvexe Kanten: Werkzeug wird abgezogen, konkave: angefügt.
 // trim: Ebenen { n, o }, an denen der Kern das Werkzeug abschneidet (behalten wird n·x ≥ o).
 export function buildEdgeTool(mesh, chain, kind, size) {
+  return { ...edgeTool(mesh, chain, kind, size, 0), heal: edgeTool(mesh, chain, kind, size, GROW).mesh };
+}
+
+// grow: Profil um diesen Betrag ins Material (bzw. bei Innenkanten in den Hohlraum) versetzt. Daraus wird
+// das Volumen gemerkt, mit dem sich die Rundung wieder löschen lässt; so liegen beim Löschen keine
+// Flächen genau aufeinander.
+function edgeTool(mesh, chain, kind, size, grow) {
   const { fn, weld } = analyze(mesh), { v, t } = mesh, segs = chain.segs, m = segs.length;
   const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
   const nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
@@ -90,9 +156,15 @@ export function buildEdgeTool(mesh, chain, kind, size) {
     const p = i < m ? P(segs[i].u) : P(segs[m - 1].v);
     const alpha = Math.acos(Math.max(-1, Math.min(1, dot(t1, t2))));
     const d = kind === 'fillet' ? size / Math.tan(alpha / 2) : size;
+    if (near.length === 2) { // Krümmung der Kante: Werkzeug darf auf der Innenseite nicht überschlagen
+      const kv = sub(dirs[near[1]], dirs[near[0]]), sl = s => Math.hypot(...sub(P(segs[s].v), P(segs[s].u)));
+      const k = Math.hypot(...kv) / ((sl(near[0]) + sl(near[1])) / 2);
+      if (k > 1e-9 && [t1, t2].some(tt => dot(tt, norm(kv)) > 0.5) && d > 0.98 / k) throw new Error('Radius zu groß für diese Kante');
+    }
     const A = add(p, t1, d), B = add(p, t2, d);
     const Q = add(p, add(N1, N2), sgn * EPS / Math.max(0.2, 1 + dot(N1, N2)));
     const ring = [A, add(A, N1, sgn * EPS), Q, add(B, N2, sgn * EPS), B];
+    let toward = () => norm(add(N1, N2)).map(c => -sgn * c);
     if (kind === 'fillet') {
       const C = add(p, norm(add(t1, t2)), size / Math.sin(alpha / 2));
       const eA = norm(sub(A, C)), eB = norm(sub(B, C)), phi = Math.acos(Math.max(-1, Math.min(1, dot(eA, eB))));
@@ -101,7 +173,9 @@ export function buildEdgeTool(mesh, chain, kind, size) {
         const s = j / nArc, wa = Math.sin(s * phi) / Math.sin(phi), wb = Math.sin((1 - s) * phi) / Math.sin(phi);
         ring.push(add(C, add([eA[0] * wa, eA[1] * wa, eA[2] * wa], eB, wb), size));
       }
+      toward = q => norm(sub(C, q));
     }
+    if (grow) for (const j of [0, 4, ...ring.keys()].filter((j, k, a) => (j === 0 || j >= 4) && a.indexOf(j) === k)) ring[j] = add(ring[j], toward(ring[j]), grow);
     rings.push(ring);
   }
 
@@ -146,11 +220,13 @@ export function buildEdgeTool(mesh, chain, kind, size) {
   const R = rings.length, N = rings[0].length, verts = new Float32Array(R * N * 3), tris = [];
   rings.forEach((r, k) => r.forEach((q, j) => verts.set(q, (k * N + j) * 3)));
   const spans = chain.closed ? R : R - 1;
+  const surf = []; // 1 = Dreieck der Rundungs-/Fasenfläche (Profil von B über den Bogen nach A)
   for (let k = 0; k < spans; k++) {
     const a = k * N, b = ((k + 1) % R) * N;
     for (let j = 0; j < N; j++) {
       const j2 = (j + 1) % N;
       tris.push(a + j, b + j, b + j2, a + j, b + j2, a + j2);
+      surf.push(+(j >= 4), +(j >= 4));
     }
   }
   if (!chain.closed) {
@@ -158,6 +234,7 @@ export function buildEdgeTool(mesh, chain, kind, size) {
     for (let i = 1; i < N - 1; i++) { // Deckel als Fächer von der Außenecke Q (Index 2)
       const j = (2 + i) % N, j2 = (3 + i) % N;
       tris.push(2, j, j2, e + 2, e + j2, e + j);
+      surf.push(0, 0);
     }
   }
   let vol = 0;
@@ -168,7 +245,7 @@ export function buildEdgeTool(mesh, chain, kind, size) {
          + verts[a + 2] * (verts[b] * verts[c + 1] - verts[b + 1] * verts[c]);
   }
   if (vol < 0) for (let i = 0; i < tris.length; i += 3) { const x = tris[i + 1]; tris[i + 1] = tris[i + 2]; tris[i + 2] = x; }
-  return { convex, mesh: { v: verts, t: new Uint32Array(tris) }, trim };
+  return { convex, mesh: { v: verts, t: new Uint32Array(tris), f: new Uint32Array(surf) }, trim };
 }
 
 // Eckübergang: Laufen drei verrundete Kanten in einer Ecke zusammen, schneiden sich die Kantenwerkzeuge
@@ -181,14 +258,14 @@ export function cornerTools(mesh, chains, kind, size) {
   const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
   const nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
   const ends = new Map();
-  for (const ch of chains) {
-    if (ch.closed) continue;
+  chains.forEach((ch, ci) => {
+    if (ch.closed) return;
     const convex = isConvex(mesh, ch), f = ch.segs[0], l = ch.segs[ch.segs.length - 1];
     for (const [vi, s] of [[f.u, f], [l.v, l]]) {
       if (!ends.has(vi)) ends.set(vi, []);
-      ends.get(vi).push({ convex, normals: [nrm(s.t1), nrm(s.t2)] });
+      ends.get(vi).push({ convex, ci, normals: [nrm(s.t1), nrm(s.t2)] });
     }
-  }
+  });
   const tools = [];
   for (const [vi, list] of ends) {
     if (list.length !== 3 || list.some(e => e.convex !== list[0].convex)) continue;
@@ -206,7 +283,7 @@ export function cornerTools(mesh, chains, kind, size) {
     // Ausdehnung des Werkzeugs: Ecke in Koordinaten der Richtungen d (p − C = Σ a_i d_i) plus Rand
     const y = x.map(c => -c), a = [cross(d[1], d[2]), cross(d[2], d[0]), cross(d[0], d[1])].map(c => dot(y, c) / det);
     const ext = a.map(ai => Math.max(ai + 0.25 * size, 1.5 * (size + GAP)));
-    tools.push({ convex: sgn > 0, mesh: cornerMesh(C, d, size + GAP, n, ext) });
+    tools.push({ convex: sgn > 0, mesh: cornerMesh(C, d, size + GAP, n, ext), heal: cornerMesh(C, d, size + GAP - GROW, n, ext), chains: list.map(e => e.ci) });
   }
   return tools;
 }
@@ -233,6 +310,7 @@ function cornerMesh(C, d, r, n, ext) {
     faces.push([tr, inward(tr)]);
     if (i + j < n - 1) { const t2 = [at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)]; faces.push([t2, inward(t2)]); }
   }
+  const patch = faces.length;
   // Ecken des Spats: Pi = C + ext_i d_i, Pij = Pi + ext_j d_j, Pall
   const pt = q => { verts.push(q); return verts.length - 1; };
   const Pv = d.map((q, i) => add(C, q, ext[i]));
@@ -262,5 +340,5 @@ function cornerMesh(C, d, r, n, ext) {
   }
   const vv = new Float32Array(verts.length * 3);
   verts.forEach((q, i) => vv.set(q, i * 3));
-  return { v: vv, t: new Uint32Array(out) };
+  return { v: vv, t: new Uint32Array(out), f: new Uint32Array(faces.length).map((_, i) => +(i < patch)) };
 }

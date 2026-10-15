@@ -42,22 +42,16 @@ export class Viewport {
   }
 
   _buildGrid() {
-    const lines = (step, half, skip) => {
-      const p = [];
-      for (let i = -half; i <= half; i += step) {
-        if (skip && i % skip === 0) continue;
-        p.push(i, -half, 0, i, half, 0, -half, i, 0, half, i, 0);
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
-      return g;
-    };
     const mat = (color, opacity) => new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
     this.grid = new THREE.Group();
-    this.grid.add(new THREE.LineSegments(lines(10, 500, 50), mat(0x7f8a9c, 0.3)));
-    this.grid.add(new THREE.LineSegments(lines(50, 500, 0), mat(0x5f6b7c, 0.45)));
+    this.gridMinor = new THREE.LineSegments(new THREE.BufferGeometry(), mat(0x7f8a9c, 0.2));
+    this.gridMajor = new THREE.LineSegments(new THREE.BufferGeometry(), mat(0x5f6b7c, 0.45));
+    this.grid.add(this.gridMinor, this.gridMajor);
     this.grid.matrixAutoUpdate = false;
     this.scene.add(this.grid);
+    this.gridKey = '';
+    this.gridStep = () => 10; // von außen gesetzt: Rasterweite zur Pixelgröße
+    this.onGrid = null;
 
     const axes = new THREE.BufferGeometry();
     axes.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 500, 0, 0, 0, 0, 0, 0, 500, 0, 0, 0, 0, 0, 0, 120], 3));
@@ -68,6 +62,7 @@ export class Viewport {
   // Raster auf eine Skizzenebene legen (null = XY-Grundebene)
   setWorkPlane(m16) {
     if (m16) this.grid.matrix.fromArray(m16); else this.grid.matrix.identity();
+    this.gridKey = '';
     this.requestRender();
   }
 
@@ -99,8 +94,30 @@ export class Viewport {
     this._raf = requestAnimationFrame(() => { this._raf = 0; this.render(); });
   }
 
+  // Raster passend zur Zoomstufe: feine Linien im Rasterabstand, kräftige alle 10, um die Blickmitte
+  _updateGrid() {
+    const step = this.gridStep(this.pxSize(this.view.target)), major = step * 10;
+    const inv = this.grid.matrix.clone().invert(), c = this.view.target.clone().applyMatrix4(inv);
+    const cx = Math.round(c.x / major) * major, cy = Math.round(c.y / major) * major, n = 150;
+    const key = [step, cx, cy].join();
+    if (key === this.gridKey) return;
+    if (this.gridKey.split(',')[0] !== String(step)) this.onGrid?.(step);
+    this.gridKey = key;
+    const minor = [], maj = [], h = n * step;
+    for (let k = -n; k <= n; k++) {
+      const x = cx + k * step, y = cy + k * step, out = k % 10 ? minor : maj;
+      out.push(x, cy - h, 0, x, cy + h, 0, cx - h, y, 0, cx + h, y, 0);
+    }
+    for (const [obj, arr] of [[this.gridMinor, minor], [this.gridMajor, maj]]) {
+      obj.geometry.dispose();
+      obj.geometry = new THREE.BufferGeometry();
+      obj.geometry.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    }
+  }
+
   render() {
     this.applyView();
+    this._updateGrid();
     this.onBeforeRender?.();
     this.renderer.render(this.scene, this.camera);
     this.ctx.clearRect(0, 0, this.w, this.h);

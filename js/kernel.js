@@ -1,4 +1,6 @@
-// Geometriekern: dünne Schicht über Manifold (WASM). Nach außen nur Meshes { v: Float32Array, t: Uint32Array }.
+// Geometriekern: dünne Schicht über Manifold (WASM). Nach außen nur Meshes { v: Float32Array, t: Uint32Array, f? }.
+// f: Kennung je Dreieck; die oberen 12 Bit markieren Flächen einer Rundung/Fase (0 = keine). Manifold
+// reicht sie als faceID durch alle Booleschen Operationen weiter.
 import Module from '../vendor/manifold.js';
 import { planeMatrix, to3D } from './sketch.js';
 
@@ -11,11 +13,18 @@ export async function initKernel() {
   ({ Manifold, CrossSection, Mesh } = wasm);
 }
 
+const TAG = 1 << 20;
+export const tagOf = (mesh, tri) => (mesh.f ? Math.floor(mesh.f[tri] / TAG) : 0);
+export const maxTag = mesh => { let m = 0; if (mesh.f) for (const x of mesh.f) m = Math.max(m, Math.floor(x / TAG)); return m; };
+
 function toManifold(mesh) {
   let m = cache.get(mesh);
   if (!m) {
     const mm = new Mesh({ numProp: 3, vertProperties: mesh.v, triVerts: mesh.t });
     mm.merge();
+    const nT = mesh.t.length / 3, f = new Uint32Array(nT);
+    for (let i = 0; i < nT; i++) f[i] = tagOf(mesh, i) * TAG + (i & (TAG - 1));
+    Object.assign(mm, { faceID: f, runIndex: new Uint32Array([0, mesh.t.length]), runOriginalID: new Uint32Array([Manifold.reserveIDs(1)]) });
     m = new Manifold(mm);
     cache.set(mesh, m);
   }
@@ -32,6 +41,7 @@ function toMesh(man) {
     v = out;
   }
   const mesh = { v: new Float32Array(v), t: new Uint32Array(g.triVerts) };
+  if (g.faceID?.length === mesh.t.length / 3 && g.faceID.some(x => x >= TAG)) mesh.f = new Uint32Array(g.faceID);
   cache.set(mesh, man);
   return mesh;
 }
@@ -78,22 +88,43 @@ export function boolean(op, a, b) {
 
 export const unionAll = meshes => meshes.reduce((a, b) => boolean('union', a, b));
 
-// Kantenwerkzeug an seinen Ebenen abschneiden (behalten wird n·x ≥ o). Die Schnittfläche soll genau
-// in der Körperfläche liegen; das gilt erst nach dem Runden auf Float32, daher ohne Cache weiterrechnen.
+// Kantenwerkzeug markieren (Rundungs-/Fasenfläche bekommt t.tag) und an seinen Ebenen abschneiden
+// (behalten wird n·x ≥ o). Die Schnittfläche soll genau in der Körperfläche liegen; das gilt erst
+// nach dem Runden auf Float32, daher ohne Cache weiterrechnen.
 export function toolMesh(t) {
-  if (!t.trim?.length) return t.mesh;
-  const m = toMesh(t.trim.reduce((a, p) => a.trimByPlane(p.n, p.o), toManifold(t.mesh)));
+  const tagged = t.tag && t.mesh.f ? { ...t.mesh, f: t.mesh.f.map(x => (x ? t.tag * TAG : 0)) } : t.mesh;
+  if (!t.trim?.length) return tagged;
+  const m = toMesh(t.trim.reduce((a, p) => a.trimByPlane(p.n, p.o), toManifold(tagged)));
   if (m) cache.delete(m);
   return m;
 }
 
-// Verrundung/Fase: Werkzeuge an konvexen Kanten abziehen, an konkaven anfügen
-export function blend(mesh, tools) {
-  const cut = tools.filter(t => t.convex).map(toolMesh), fill = tools.filter(t => !t.convex).map(toolMesh);
-  for (const m of [...cut, ...fill]) if (toManifold(m).isEmpty()) throw new Error('Werkzeugkörper ungültig');
+// Verrundung/Fase: Werkzeuge an konvexen Kanten abziehen, an konkaven anfügen. Je Werkzeug wird das
+// entfernte bzw. hinzugefügte Volumen gemerkt, damit sich die Rundung später wieder löschen lässt.
+export function blendFeatures(mesh, tools) {
+  const ms = tools.map(toolMesh);
+  for (const m of ms) if (!m || toManifold(m).isEmpty()) throw new Error('Werkzeugkörper ungültig');
+  const cut = ms.filter((_, i) => tools[i].convex), fill = ms.filter((_, i) => !tools[i].convex);
   let r = mesh;
   if (cut.length) r = boolean('subtract', r, unionAll(cut));
   if (r && fill.length) r = boolean('union', r, unionAll(fill));
+  const features = tools.map((t, i) => ({
+    tag: t.tag, kind: t.kind, convex: t.convex, links: t.links,
+    region: boolean(t.convex ? 'intersect' : 'subtract', t.heal ? toolMesh({ ...t, tag: 0, mesh: t.heal }) : ms[i], mesh),
+  })).filter(x => x.tag && x.region);
+  return { mesh: r, features };
+}
+export const blend = (mesh, tools) => blendFeatures(mesh, tools).mesh;
+
+// Rundung/Fase entfernen: gemerktes Volumen wieder anfügen bzw. abziehen – ohne den Teil, den
+// verbleibende Rundungen/Fasen (keep) ebenfalls entfernt bzw. angefügt haben
+export function unblend(mesh, features, keep = []) {
+  let r = mesh;
+  for (const x of features) {
+    const others = keep.filter(k => k.convex === x.convex).map(k => k.region);
+    const reg = others.length ? boolean('subtract', x.region, unionAll(others)) : x.region;
+    if (reg) r = r && boolean(x.convex ? 'union' : 'subtract', r, reg);
+  }
   return r;
 }
 
