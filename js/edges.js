@@ -170,15 +170,18 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
 
   const M = chain.closed ? m : m + 1;
   const surf = nearTriangles(mesh, chain, 12 * size + 1);
-  let nArc = 0;
-  const rings = [];
-  for (let i = 0; i < M; i++) {
+  const frames = Array.from({ length: M }, (_, i) => {
     const near = [chain.closed ? (i - 1 + m) % m : i - 1, i < m ? i : -1].filter(k => k >= 0);
     const sum = f => norm(near.map(f).reduce((a, b) => add(a, b)));
-    const tau = sum(k => dirs[k]), N1 = sum(k => nrm(segs[k].t1)), N2 = sum(k => nrm(segs[k].t2));
-    const p = i < m ? P(segs[i].u) : P(segs[m - 1].v);
+    return { near, tau: sum(k => dirs[k]), N1: sum(k => nrm(segs[k].t1)), N2: sum(k => nrm(segs[k].t2)), p: i < m ? P(segs[i].u) : P(segs[m - 1].v) };
+  });
+  // Feinheit des Bogens nach dem stärksten Bogen der ganzen Kante – nicht nach dem ersten Profil, sonst hinge das
+  // Werkzeug davon ab, wo die Kette im Netz beginnt
+  const nArc = Math.max(...frames.map(f => profile(f.p, f.tau, f.N1, f.N2, kind, size, sgn, 0).nArc));
+  const rings = [];
+  for (let i = 0; i < M; i++) {
+    const { near, tau, N1, N2, p } = frames[i];
     const pr = profile(p, tau, N1, N2, kind, size, sgn, grow, nArc, surf), { t1, t2, d } = pr;
-    nArc = pr.nArc;
     if (near.length === 2) { // Krümmung der Kante: Werkzeug darf auf der Innenseite nicht überschlagen (Radius gleich dem Kantenradius geht: Kugelecke)
       // Boolesche Ergebnisse zerteilen Kanten oft in winzige Stücke (z. B. an einer Fase), auf die sich dann
       // der ganze Knick einer Polygonecke drängt. Solche Splitter werden mit dem nächsten langen Stück

@@ -148,7 +148,30 @@ export const blend = (mesh, tools) => blendFeatures(mesh, tools).mesh;
 // Abgezogen wird dabei das exakte Volumen der verbleibenden (region ∩ tool): Das gemerkte Volumen reicht um
 // GROW ins Material und würde sonst z. B. bei einer Rundung auf einer Fase eine dünne Stufe aus der
 // wiederhergestellten Kante schneiden.
+// Überschneidet sich eine verbleibende Rundung mit einer gelöschten (z. B. obere und untere Kante eines Lochs
+// in einer schrägen Fläche, die sich an der flachen Stelle fast berühren), wird sie mitentfernt und danach mit
+// ihrem gespeicherten Werkzeug neu geschnitten – so, als hätte es die gelöschte nie gegeben. Stückweises
+// Nachschneiden ließe dort, wo Flächen genau aufeinanderliegen, hauchdünne Stufen stehen.
 export function unblendFeatures(mesh, features, keep = []) {
+  const touch = (a, b) => [[a.tool, b.region], [b.tool, a.region]].some(([t, g]) => t && g && toManifold(t).intersect(toManifold(g)).volume() > 1e-6);
+  const redo = keep.filter(y => y.tool && features.some(x => touch(x, y)));
+  if (redo.length) {
+    const u = unblendCore(mesh, [...features, ...redo], keep.filter(y => !redo.includes(y)));
+    if (u.mesh) {
+      const before = u.mesh, cut = redo.filter(y => y.convex), fill = redo.filter(y => !y.convex);
+      let r = before;
+      if (cut.length) r = boolean('subtract', r, unionAll(cut.map(y => y.tool)));
+      if (r && fill.length) r = boolean('union', r, unionAll(fill.map(y => y.tool)));
+      const kept = new Map(u.keep.map((y, i) => [keep.filter(k => !redo.includes(k))[i], y]));
+      return {
+        mesh: r,
+        keep: keep.map(y => kept.get(y) || { ...y, region: boolean('union', y.region, boolean(y.convex ? 'intersect' : 'subtract', y.tool, before)) || y.region }),
+      };
+    }
+  }
+  return unblendCore(mesh, features, keep);
+}
+function unblendCore(mesh, features, keep) {
   let r = mesh;
   keep = keep.slice();
   const exact = k => (k.tool && boolean('intersect', k.region, k.tool)) || k.region;

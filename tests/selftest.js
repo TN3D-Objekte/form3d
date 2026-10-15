@@ -449,6 +449,21 @@ try {
     }
     log(res.every(([, n0, n1, n2]) => n1 <= n0 && n2 === n0), `Loch in schräger Fläche verrundet und wieder gelöscht: Kanten vorher/verrundet/gelöscht ${res.map(x => x[0] + '°: ' + x.slice(1).join('/')).join(', ')} (Zacken oder Splitter ergäben zusätzliche Kanten)`);
   }
+  // Zwei Rundungen, die sich berühren (obere und untere Lochkante im 45°-Keil): unabhängig von der Reihenfolge,
+  // und Löschen einer davon ergibt genau den Körper, als hätte es sie nie gegeben
+  {
+    const vol = m => (m ? K.props(m).volume : 0), sd = (a, b) => vol(K.boolean('subtract', a, b)) + vol(K.boolean('subtract', b, a));
+    let m = K.extrude([{ outer: [[0, 0], [10, 0], [10, 10]], holes: [] }], { o: [0, 0, 0], x: [1, 0, 0], y: [0, 0, 1], n: [0, -1, 0] }, 8);
+    m = K.boolean('subtract', m, K.transform(K.primitive('cyl', { d: 4.5, h: 30 }), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, -4, -5, 1]));
+    const edge = (mesh, top) => edgeChains(mesh).filter(c => c.closed).sort((p, q) => (top ? -1 : 1) * (p.pts.reduce((s, x) => s + x[2], 0) / p.pts.length - q.pts.reduce((s, x) => s + x[2], 0) / q.pts.length))[0];
+    const fil = (r, top, tag) => { const x = K.blendFeatures(r.mesh, [Object.assign(buildEdgeTool(r.mesh, edge(r.mesh, top), 'fillet', 1), { tag, kind: 'fillet', size: 1 })]); return { mesh: x.mesh, feats: [...r.feats, ...x.features] }; };
+    const p0 = { mesh: m, feats: [] }, onlyTop = fil(p0, true, 1), onlyBot = fil(p0, false, 1);
+    const tb = fil(onlyTop, false, 2), bt = fil(onlyBot, true, 2);
+    const del = (r, i) => K.unblend(r.mesh, [r.feats[i]], r.feats.filter((_, k) => k !== i));
+    const devs = [sd(tb.mesh, bt.mesh), sd(del(tb, 0), onlyBot.mesh), sd(del(tb, 1), onlyTop.mesh), sd(del(bt, 0), onlyTop.mesh), sd(del(bt, 1), onlyBot.mesh)];
+    const extra = [del(tb, 0), del(bt, 1)].map(x => edgeChains(x).length - edgeChains(onlyBot.mesh).length);
+    log(devs.every(d => d < 1e-3) && extra.every(e => e === 0), `Zwei sich berührende Rundungen: Abweichungen ${devs.map(d => d.toFixed(4)).join(', ')} mm³ (Reihenfolge, Löschen), zusätzliche Kanten ${extra}`);
+  }
   // Kombinieren über die Leiste: Ziel, dann Werkzeug antippen; Abziehen, Tauschen + Schnitt, Vereinigen mit
   // verrundeten Körpern (Kennungen bleiben eindeutig, Rundung lässt sich danach noch auswählen)
   {
