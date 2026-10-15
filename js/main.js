@@ -515,10 +515,10 @@ function deleteSelection() {
 // Rundung/Fase löschen: Kante wird wieder scharf. Kugelecken, die an der Rundung hängen, gehen mit.
 function deleteFeature(bodyId, tag) {
   const b = body(bodyId), del = (b.features || []).filter(f => f.tag === tag || f.links?.includes(tag));
-  let m = null;
-  try { m = K.unblend(b.mesh, del, b.features.filter(f => !del.includes(f))); } catch (e) { console.error(e); }
+  let m = null, keep = null;
+  try { ({ mesh: m, keep } = K.unblendFeatures(b.mesh, del, b.features.filter(f => !del.includes(f)))); } catch (e) { console.error(e); }
   if (!m) return UI.toast('Löschen nicht möglich');
-  patchBody(bodyId, { mesh: m, features: b.features.filter(f => !del.includes(f)) });
+  patchBody(bodyId, { mesh: m, features: keep });
   st.op = null;
   setPreview(null);
   clearSel();
@@ -899,7 +899,7 @@ function stopTransform() {
   st.xf = null;
   vp.gizmo.detach();
 }
-const moveFeatures = (b, m16) => b.features?.map(f => ({ ...f, region: K.transform(f.region, m16) }));
+const moveFeatures = (b, m16) => b.features?.map(f => ({ ...f, region: K.transform(f.region, m16), tool: f.tool && K.transform(f.tool, m16) }));
 function bake(delta) {
   const ids = sel.bodies.slice();
   doc.bodies = doc.bodies.map(b => {

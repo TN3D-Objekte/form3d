@@ -219,6 +219,18 @@ try {
   log(innerSharp === 0 && smoothSurface(filH, anH, topH).length === 1 && filS.every(g => anH.faces[g].tag === 1),
     `Bohrungsrundung: ${innerSharp} Linien in der Rundung, Deckfläche einzeln wählbar (${smoothSurface(filH, anH, topH).length}), Rundung ${filS.length} Teilflächen`);
 
+  // Zwei Rundungen treffen sich an einer Ecke, die erste wird gelöscht: die zweite muss danach bis zur
+  // Ecke durchlaufen (wie direkt am scharfen Quader angelegt), ohne stehengebliebenen Klotz
+  const q0 = K.primitive('box', { l: 50, b: 50, h: 50 });
+  const topEdge = (m, test) => edgeChains(m).find(ch => !ch.closed && ch.pts.every(p => p[2] > 49.9 && test(p)));
+  const fA = K.blendFeatures(q0, [Object.assign(buildEdgeTool(q0, topEdge(q0, p => p[1] < -24.9), 'fillet', 5), { tag: 1 })]);
+  const fB = K.blendFeatures(fA.mesh, [Object.assign(buildEdgeTool(fA.mesh, topEdge(fA.mesh, p => p[0] > 24.9), 'fillet', 5), { tag: 2 })]);
+  const onlyB = K.props(K.blend(q0, [Object.assign(buildEdgeTool(q0, topEdge(q0, p => p[0] > 24.9), 'fillet', 5), { tag: 2 })])).volume;
+  const delA = K.unblendFeatures(fB.mesh, fA.features, fB.features), vCorner = K.props(delA.mesh).volume;
+  const vBack = K.props(K.unblend(delA.mesh, delA.keep, [])).volume;
+  const vOld = K.props(K.unblend(fB.mesh, fA.features, fB.features.map(f => ({ ...f, tool: undefined })))).volume; // Verhalten ohne Werkzeug
+  log(Math.abs(vCorner - onlyB) < 1 && Math.abs(vBack - 125000) < 1 && vOld - onlyB > 1, `Erste von zwei Eckrundungen gelöscht: V ${vCorner.toFixed(1)} (Soll ${onlyB.toFixed(1)}, ohne Nachschneiden ${vOld.toFixed(1)}), danach zweite gelöscht: ${vBack.toFixed(1)} (Soll 125000)`);
+
   // Rotation: Rechteck x 10..20, y 0..10 um die Y-Achse
   const ring = K.revolve([{ outer: [[10, 0], [20, 0], [20, 10], [10, 10]], holes: [] }], S.BASE_PLANES.xz, { p: [0, 0], d: [0, 1] }, 360);
   const vr = K.props(ring).volume, zs = ring.v.filter((_, i) => i % 3 === 2);

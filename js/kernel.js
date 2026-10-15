@@ -109,7 +109,7 @@ export function blendFeatures(mesh, tools) {
   if (cut.length) r = boolean('subtract', r, unionAll(cut));
   if (r && fill.length) r = boolean('union', r, unionAll(fill));
   const features = tools.map((t, i) => ({
-    tag: t.tag, kind: t.kind, convex: t.convex, links: t.links,
+    tag: t.tag, kind: t.kind, convex: t.convex, links: t.links, tool: ms[i],
     region: boolean(t.convex ? 'intersect' : 'subtract', t.heal ? toolMesh({ ...t, tag: 0, mesh: t.heal }) : ms[i], mesh),
   })).filter(x => x.tag && x.region);
   return { mesh: r, features };
@@ -117,16 +117,29 @@ export function blendFeatures(mesh, tools) {
 export const blend = (mesh, tools) => blendFeatures(mesh, tools).mesh;
 
 // Rundung/Fase entfernen: gemerktes Volumen wieder anfügen bzw. abziehen – ohne den Teil, den
-// verbleibende Rundungen/Fasen (keep) ebenfalls entfernt bzw. angefügt haben
-export function unblend(mesh, features, keep = []) {
+// verbleibende Rundungen/Fasen (keep) ebenfalls entfernt bzw. angefügt haben. Treffen sich zwei
+// Rundungen an einer Ecke, hat die später angelegte dort nur noch Luft geschnitten; ihr Werkzeug
+// (tool) schneidet das wiederhergestellte Volumen deshalb erneut, damit sie bis zur Ecke durchläuft.
+// Ergebnis: neues Netz und die verbleibenden Rundungen mit ggf. vergrößertem Volumen.
+export function unblendFeatures(mesh, features, keep = []) {
   let r = mesh;
+  keep = keep.slice();
   for (const x of features) {
     const others = keep.filter(k => k.convex === x.convex).map(k => k.region);
     const reg = others.length ? boolean('subtract', x.region, unionAll(others)) : x.region;
-    if (reg) r = r && boolean(x.convex ? 'union' : 'subtract', r, reg);
+    if (!reg || !r) continue;
+    r = boolean(x.convex ? 'union' : 'subtract', r, reg);
+    keep = keep.map(y => {
+      if (!r || y.convex !== x.convex || !y.tool) return y;
+      const part = boolean('intersect', y.tool, reg);
+      if (!part || toManifold(part).volume() < 1e-6) return y;
+      r = boolean(x.convex ? 'subtract' : 'union', r, part);
+      return { ...y, region: boolean('union', y.region, part) };
+    });
   }
-  return r;
+  return { mesh: r, keep };
 }
+export const unblend = (mesh, features, keep) => unblendFeatures(mesh, features, keep).mesh;
 
 export const intersects = (a, b) => !toManifold(a).intersect(toManifold(b)).isEmpty();
 

@@ -45,7 +45,7 @@ const plain = () => ({
   name: doc.name, nextId: doc.nextId, sketches: doc.sketches,
   bodies: doc.bodies.map(b => ({
     id: b.id, name: b.name, color: b.color, visible: b.visible, v: b.mesh.v, t: b.mesh.t, f: b.mesh.f,
-    features: b.features?.map(x => ({ tag: x.tag, kind: x.kind, convex: x.convex, links: x.links, v: x.region.v, t: x.region.t })),
+    features: b.features?.map(x => ({ tag: x.tag, kind: x.kind, convex: x.convex, links: x.links, v: x.region.v, t: x.region.t, tool: x.tool && { v: x.tool.v, t: x.tool.t, f: x.tool.f } })),
   })),
 });
 function adopt(d) {
@@ -54,7 +54,7 @@ function adopt(d) {
   doc.sketches = d.sketches || [];
   doc.bodies = (d.bodies || []).map(b => ({
     id: b.id, name: b.name, color: b.color, visible: b.visible !== false, mesh: b.f ? { v: b.v, t: b.t, f: b.f } : { v: b.v, t: b.t },
-    features: b.features?.map(x => ({ tag: x.tag, kind: x.kind, convex: x.convex, links: x.links, region: { v: x.v, t: x.t } })),
+    features: b.features?.map(x => ({ tag: x.tag, kind: x.kind, convex: x.convex, links: x.links, region: { v: x.v, t: x.t }, tool: x.tool })),
   }));
 }
 function scheduleSave() {
@@ -94,14 +94,14 @@ export function toFile() {
   const d = plain();
   d.format = 'form3d/1';
   const enc = x => ({ ...x, v: b64(x.v), t: b64(x.t), ...(x.f && { f: b64(x.f) }) });
-  d.bodies = d.bodies.map(b => ({ ...enc(b), features: b.features?.map(enc) }));
+  d.bodies = d.bodies.map(b => ({ ...enc(b), features: b.features?.map(x => ({ ...enc(x), tool: x.tool && enc(x.tool) })) }));
   return JSON.stringify(d);
 }
 export function fromFile(text) {
   const d = JSON.parse(text);
   if (d.format !== 'form3d/1') throw new Error('Unbekanntes Dateiformat');
   const dec = x => ({ ...x, v: unb64(x.v, Float32Array), t: unb64(x.t, Uint32Array), ...(x.f && { f: unb64(x.f, Uint32Array) }) });
-  d.bodies = d.bodies.map(b => ({ ...dec(b), features: b.features?.map(dec) }));
+  d.bodies = d.bodies.map(b => ({ ...dec(b), features: b.features?.map(x => ({ ...dec(x), tool: x.tool && dec(x.tool) })) }));
   adopt(d);
   resetHistory();
 }
