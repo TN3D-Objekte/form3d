@@ -231,6 +231,18 @@ try {
   const vOld = K.props(K.unblend(fB.mesh, fA.features, fB.features.map(f => ({ ...f, tool: undefined })))).volume; // Verhalten ohne Werkzeug
   log(Math.abs(vCorner - onlyB) < 1 && Math.abs(vBack - 125000) < 1 && vOld - onlyB > 1, `Erste von zwei Eckrundungen gelöscht: V ${vCorner.toFixed(1)} (Soll ${onlyB.toFixed(1)}, ohne Nachschneiden ${vOld.toFixed(1)}), danach zweite gelöscht: ${vBack.toFixed(1)} (Soll 125000)`);
 
+  // Auto-Modus ohne zugehörigen Körper (Skizze auf Grundebene): in Material hinein = Loch, vom Körper
+  // weg aber berührend = anfügen, frei im Raum = neuer Körper
+  {
+    const { makeExtrude, resolveMode } = window.form3d, saved = doc.bodies;
+    doc.bodies = [{ id: -1, visible: true, mesh: K.primitive('box', { l: 50, b: 50, h: 50 }) }];
+    const disc = c => [{ outer: S.tessellate({ type: 'circle', c, r: 8 }).slice(0, -1), holes: [] }];
+    const mode = (c, dist) => resolveMode(makeExtrude({ regions: disc(c), plane: S.BASE_PLANES.xy, parentId: null, dist }));
+    const got = [mode([0, 0], 20), mode([0, 0], -20), mode([100, 0], 20)].join();
+    doc.bodies = saved;
+    log(got === 'cut,add,new', 'Auto ohne Bezugskörper: hinein/heraus/frei = ' + got + ' (Soll cut,add,new)');
+  }
+
   // Rotation: Rechteck x 10..20, y 0..10 um die Y-Achse
   const ring = K.revolve([{ outer: [[10, 0], [20, 0], [20, 10], [10, 10]], holes: [] }], S.BASE_PLANES.xz, { p: [0, 0], d: [0, 1] }, 360);
   const vr = K.props(ring).volume, zs = ring.v.filter((_, i) => i % 3 === 2);

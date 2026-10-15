@@ -283,7 +283,31 @@ function applySolid(tool, mode, parentId, auto) {
 // Skizzenebenen auf Körperflächen sind gerundet und weichen um Bruchteile eines µm von der Fläche ab;
 // ohne Überstand bleiben beim Durchschneiden hauchdünne Häute stehen
 const CUT_OVER = 1e-3;
-const resolveMode = o => (o.type === 'edge' ? (o.convex ? 'cut' : 'add') : o.mode !== 'auto' ? o.mode : o.parentId != null && body(o.parentId) ? (o.type === 'extrude' && o.dist < 0 ? 'cut' : 'add') : 'new');
+const resolveMode = o => (o.type === 'edge' ? (o.convex ? 'cut' : 'add') : o.mode !== 'auto' ? o.mode : o.parentId != null && body(o.parentId) ? (o.type === 'extrude' && o.dist < 0 ? 'cut' : 'add') : o.type === 'extrude' ? freeMode(o) : 'new');
+
+// Auto ohne zugehörigen Körper (Skizze auf einer Grundebene oder frei im Raum): beginnt die Extrusion
+// in Material, wird ein Loch geschnitten; berührt sie einen Körper, wird angefügt; sonst neuer Körper.
+// Geprüft wird eine dünne Scheibe direkt an der Skizzenebene in Zugrichtung (je Richtung gemerkt).
+function freeMode(o) {
+  if (Math.abs(o.dist) < 1e-6) return 'new';
+  const side = o.dist < 0 ? -1 : 1, bodies = doc.bodies.filter(b => b.visible);
+  o.free ||= {};
+  if (!o.free[side]) {
+    let inside = false;
+    try {
+      const slab = K.extrude(o.regions, o.plane, side * 0.5), v = K.props(slab).volume;
+      inside = bodies.some(b => { const x = K.boolean('intersect', b.mesh, slab); return x && K.props(x).volume > 0.5 * v; });
+    } catch (e) { console.warn(e); }
+    o.free[side] = inside ? 'cut' : 'add';
+  }
+  if (o.free[side] === 'cut') return 'cut';
+  if (o.free.dist !== o.dist) { // beim Ziehen am Pfeil nur einmal je Abstand rechnen
+    const tool = K.extrude(o.regions, o.plane, o.dist, 0.01); // minimal verlängert: Skizze genau auf einer Körperfläche berührt sonst nur
+    o.free.dist = o.dist;
+    o.free.touch = bodies.some(b => K.intersects(b.mesh, tool));
+  }
+  return o.free.touch ? 'add' : 'new';
+}
 
 function makeExtrude(p) {
   return {
@@ -353,7 +377,7 @@ function applyOp() {
     return UI.toast(o.type === 'revolve' && !o.axis ? 'Zuerst eine Achse wählen' : o.type === 'extrude' ? 'Am Pfeil ziehen oder Abstand eingeben' : 'Operation ergibt keinen Körper');
   }
   try {
-    applySolid(tool, resolveMode(o), o.parentId, o.mode === 'auto');
+    applySolid(tool, resolveMode(o), o.parentId, o.mode === 'auto' && o.parentId != null);
   } catch (e) {
     console.error(e);
     return UI.toast('Operation fehlgeschlagen');
@@ -1494,7 +1518,7 @@ async function init() {
   if ('serviceWorker' in navigator && isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-window.form3d = { doc, vp, st, sel, sketch, body, railPick, pick, applyOp, sync, refresh: () => { sync(); refreshOp(); }, appState, replayStart };
+window.form3d = { doc, vp, st, sel, sketch, body, railPick, pick, applyOp, sync, refresh: () => { sync(); refreshOp(); }, appState, replayStart, makeExtrude, resolveMode };
 init().then(() => {
   const q = new URLSearchParams(location.search);
   if (q.has('selftest')) import('../tests/selftest.js');
