@@ -550,7 +550,7 @@ function deleteSelection() {
 // Rundung/Fase löschen: Kante wird wieder scharf. Kugelecken, die an der Rundung hängen, gehen mit.
 function unblendTag(b, tag) {
   const del = (b.features || []).filter(f => f.tag === tag || f.links?.includes(tag));
-  try { return { del, ...K.unblendFeatures(b.mesh, del, b.features.filter(f => !del.includes(f)), b.features) }; } catch (e) { console.error(e); }
+  try { return { del, ...K.unblendFeatures(b.mesh, del, b.features.filter(f => !del.includes(f))) }; } catch (e) { console.error(e); }
   return { del };
 }
 function deleteFeature(bodyId, tag) {

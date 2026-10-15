@@ -219,6 +219,15 @@ try {
   const pIn = ch => ch.pts.every(p => Math.abs(p[0]) < 20.01 && Math.abs(p[1]) < 15.01 && p[2] > 9.99) && !ch.pts.every(p => p[2] > 29.99);
   const vPk = volOf(filletAll(pocket, pIn, 4)), wantPk = 90000 - rbox(40, 30, 40, 4) / 2;
   log(Math.abs(vPk - wantPk) < 0.002 * wantPk, `Tasche, Innenecken R4: V ${vPk.toFixed(0)} (Soll ${wantPk.toFixed(0)})`);
+  // Bodenrundungen einer Tasche in einem Schritt, die zuletzt angelegte wird gelöscht: Die übrigen
+  // behalten ihr Volumen an den gemeinsamen Ecken (Ergebnis wie nur die übrigen drei angelegt)
+  {
+    const fl = edgeChains(pocket).filter(ch => ch.pts.every(p => Math.abs(p[2] - 10) < 1e-3));
+    const tools = fl.map((c, i) => Object.assign(buildEdgeTool(pocket, c, 'fillet', 3), { tag: i + 1 }));
+    const all4 = K.blendFeatures(pocket, tools), last = all4.features[all4.features.length - 1];
+    const vDel = volOf(K.unblend(all4.mesh, [last], all4.features.slice(0, -1))), want3 = volOf(K.blend(pocket, tools.slice(0, -1)));
+    log(fl.length === 4 && Math.abs(vDel - want3) < 0.5, `Letzte von vier Bodenrundungen gelöscht: V ${vDel.toFixed(1)} (Soll ${want3.toFixed(1)})`);
+  }
   // Tasche mit spitzer Zunge (16°) und stumpfer Innenecke: Bodenrundungen R2 dürfen nirgends weiter als R
   // von einer Wand in die Tasche ragen (keine Finnen); an der Zungenspitze läuft die Rundung herum
   {
