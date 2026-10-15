@@ -169,6 +169,7 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
   const convex = isConvex(mesh, chain), sgn = convex ? 1 : -1;
 
   const M = chain.closed ? m : m + 1;
+  const surf = { tris: nearTriangles(mesh, chain, 12 * size + 1), lines: surfaceLines(mesh, chain) };
   let nArc = 0;
   const rings = [];
   for (let i = 0; i < M; i++) {
@@ -176,7 +177,8 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
     const sum = f => norm(near.map(f).reduce((a, b) => add(a, b)));
     const tau = sum(k => dirs[k]), N1 = sum(k => nrm(segs[k].t1)), N2 = sum(k => nrm(segs[k].t2));
     const p = i < m ? P(segs[i].u) : P(segs[m - 1].v);
-    const pr = profile(p, tau, N1, N2, kind, size, sgn, grow, nArc), { t1, t2, d } = pr;
+    const vi = i < m ? segs[i].u : segs[m - 1].v;
+    const pr = profile(p, tau, N1, N2, kind, size, sgn, grow, nArc, surf && { tris: surf.tris, lines: surf.lines.get(vi) || [] }), { t1, t2, d } = pr;
     nArc = pr.nArc;
     if (near.length === 2) { // Krümmung der Kante: Werkzeug darf auf der Innenseite nicht überschlagen (Radius gleich dem Kantenradius geht: Kugelecke)
       // Boolesche Ergebnisse zerteilen Kanten oft in winzige Stücke (z. B. an einer Fase), auf die sich dann
@@ -268,10 +270,61 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
   return { convex, mesh: tube(rings, chain.closed), trim };
 }
 
+// Netzkanten, die von den Punkten der Kette aus in die angrenzenden Flächen laufen (je Punkt Richtung, Länge
+// und Normale des Dreiecks). Bei einer facettierten Lochwand sind das u. a. die Mantellinien.
+function surfaceLines(mesh, chain) {
+  const { fn, weld } = analyze(mesh), { v, t } = mesh, P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
+  const pts = new Set(chain.segs.flatMap(g => [g.u, g.v])), out = new Map();
+  for (let ti = 0; ti < t.length / 3; ti++) {
+    const w = [0, 1, 2].map(k => weld[t[3 * ti + k]]);
+    for (let k = 0; k < 3; k++) {
+      if (!pts.has(w[k])) continue;
+      const p = P(w[k]), n = [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
+      if (!out.has(w[k])) out.set(w[k], []);
+      for (const o of [w[(k + 1) % 3], w[(k + 2) % 3]]) {
+        const e = sub(P(o), p), len = Math.hypot(...e);
+        if (len > 1e-6) out.get(w[k]).push({ dir: e.map(x => x / len), len, n });
+      }
+    }
+  }
+  return out;
+}
+
+// Dreiecke in der Nähe der Kette (Abstand bis reach), um Profilendpunkte genau auf die Fläche zu legen
+function nearTriangles(mesh, chain, reach) {
+  const { fn } = analyze(mesh), { v, t } = mesh, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const q of chain.pts) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k] - reach); hi[k] = Math.max(hi[k], q[k] + reach); }
+  const out = [];
+  for (let ti = 0; ti < t.length / 3; ti++) {
+    const c = [0, 1, 2].map(k => { const i = t[3 * ti + k] * 3; return [v[i], v[i + 1], v[i + 2]]; });
+    if ([0, 1, 2].some(k => Math.max(c[0][k], c[1][k], c[2][k]) < lo[k] || Math.min(c[0][k], c[1][k], c[2][k]) > hi[k])) continue;
+    out.push({ c, n: [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]] });
+  }
+  return out;
+}
+
+// nächster Punkt auf dem Dreieck abc zu p (Ericson, Real-Time Collision Detection 5.1.5)
+function closestOnTri(p, [a, b, c]) {
+  const ab = sub(b, a), ac = sub(c, a), ap = sub(p, a), d1 = dot(ab, ap), d2 = dot(ac, ap);
+  if (d1 <= 0 && d2 <= 0) return a;
+  const bp = sub(p, b), d3 = dot(ab, bp), d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return b;
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) return add(a, ab, d1 / (d1 - d3));
+  const cp = sub(p, c), d5 = dot(ab, cp), d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return c;
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) return add(a, ac, d2 / (d2 - d6));
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) return add(b, sub(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6)));
+  const den = 1 / (va + vb + vc);
+  return add(add(a, ab, vb * den), ac, vc * den);
+}
+
 // Profil des Werkzeugs an Kantenpunkt p (Richtung tau, Flächennormalen N1, N2): A und B in den Flächen im
 // Abstand d von der Kante, dazwischen außen die Ecke Q, innen der Rundungsbogen von B nach A (nArc Stücke;
 // 0 = selbst wählen). grow: siehe edgeTool.
-function profile(p, tau, N1, N2, kind, size, sgn, grow, nArc = 0) {
+function profile(p, tau, N1, N2, kind, size, sgn, grow, nArc = 0, surf) {
   const t1 = norm(cross(N1, tau)), t2 = norm(cross(tau, N2)); // in den Flächen, von der Kante weg
   const alpha = Math.acos(Math.max(-1, Math.min(1, dot(t1, t2))));
   const d = kind === 'fillet' ? size / Math.tan(alpha / 2) : size;
@@ -288,6 +341,38 @@ function profile(p, tau, N1, N2, kind, size, sgn, grow, nArc = 0) {
       ring.push(add(C, add([eA[0] * wa, eA[1] * wa, eA[2] * wa], eB, wb), size));
     }
     toward = q => norm(sub(C, q));
+  }
+  // Steht die Kante schräg zu einer gekrümmten, facettierten Fläche (z. B. Loch in einer schrägen Fläche),
+  // reicht der Endpunkt A bzw. B im Profilschnitt seitlich über seine Facette hinaus und liegt minimal im
+  // Material – das Werkzeug kerbt dann je Facette die Fläche ein. Deshalb wird er auf die Netzkante gelegt,
+  // die von p aus am ehesten in seine Richtung läuft (bei einem Loch die Mantellinie; dann liegt der Rand des
+  // Werkzeugs zwischen zwei Profilen genau in der Facette), sonst auf den nächsten Punkt der Fläche. Der Bogen
+  // wird anteilig mitgeführt. Ebene Flächen bleiben unberührt.
+  if (surf) {
+    const nArcPts = ring.length - 5;
+    for (const [N, No, tt, end, eps, w] of [[N1, N2, t1, 0, 1, j => (j - 4) / (nArcPts + 1)], [N2, N1, t2, 4, 3, j => 1 - (j - 4) / (nArcPts + 1)]]) {
+      const side = f => { const c = dot(f.n, N); return c >= 0.3 && c > dot(f.n, No); };
+      const x = sub(ring[end], p);
+      if (surf.lines.every(l => !side(l) || Math.abs(dot(l.n, x)) < 1e-4)) continue;
+      let to = null, bc = 0.35;
+      for (const l of surf.lines) {
+        const c = dot(l.dir, tt);
+        if (side(l) && c > bc && l.len * c >= d * 0.999) { bc = c; to = add(p, l.dir, d / c); }
+      }
+      if (!to) {
+        let bd = 0.3 * d;
+        for (const f of surf.tris) {
+          if (!side(f)) continue;
+          const q = closestOnTri(ring[end], f.c), dd = Math.hypot(...sub(q, ring[end]));
+          if (dd < bd) { bd = dd; to = q; }
+        }
+      }
+      if (!to) continue;
+      const shift = sub(to, ring[end]);
+      ring[end] = to;
+      ring[eps] = add(ring[eps], shift);
+      for (let j = 5; j < ring.length; j++) ring[j] = add(ring[j], shift, w(j));
+    }
   }
   if (grow) for (const j of [0, 4, ...ring.keys()].filter((j, k, a) => (j === 0 || j >= 4) && a.indexOf(j) === k)) ring[j] = add(ring[j], toward(ring[j]), grow);
   return { ring, nArc, t1, t2, d };

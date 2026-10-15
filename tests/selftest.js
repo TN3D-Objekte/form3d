@@ -428,6 +428,19 @@ try {
     log(geomOk && on && res['screw/csk'][1] < -90 && res.nut[1] < -90 && res['thread/inner'][1] < -150 && res['thread/bolt'][1] > 150,
       `Druckteile: Senkloch M3 ${csk.toFixed(0)} mm³, Gewinde M6 ${thr.toFixed(0)} mm³, Mutternfalle ${nut.toFixed(0)} mm³; auf Würfel ${JSON.stringify(res)}`);
   }
+  // Loch in schräger Fläche verrunden: Rand der Rundung auf der facettierten Lochwand ohne Zacken
+  {
+    const res = [];
+    for (const [deg, r] of [[30, 2], [50, 3]]) {
+      const a = deg * Math.PI / 180, rotX = m => K.transform(m, [1, 0, 0, 0, 0, Math.cos(a), Math.sin(a), 0, 0, -Math.sin(a), Math.cos(a), 0, 0, 0, 25, 1]);
+      let m = K.boolean('subtract', K.primitive('box', { l: 60, b: 60, h: 40 }), rotX(K.primitive('box', { l: 200, b: 200, h: 100 })));
+      m = K.boolean('subtract', m, K.transform(K.primitive('cyl', { d: 20, h: 100 }), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -10, 1]));
+      const all = edgeChains(m), top = all.filter(c => c.closed).sort((p, q) => q.pts.reduce((s, x) => s + x[2], 0) / q.pts.length - p.pts.reduce((s, x) => s + x[2], 0) / p.pts.length)[0];
+      const f = K.blend(m, [buildEdgeTool(m, top, 'fillet', r)]);
+      res.push([deg, all.length, edgeChains(f).length]);
+    }
+    log(res.every(([, n0, n1]) => n1 <= n0), `Loch in schräger Fläche verrundet: Kanten vorher/nachher ${res.map(x => x[0] + '°: ' + x[1] + '/' + x[2]).join(', ')} (Zacken ergäben viele zusätzliche Kanten)`);
+  }
   // Kombinieren über die Leiste: Ziel, dann Werkzeug antippen; Abziehen, Tauschen + Schnitt, Vereinigen mit
   // verrundeten Körpern (Kennungen bleiben eindeutig, Rundung lässt sich danach noch auswählen)
   {
