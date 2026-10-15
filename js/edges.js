@@ -275,13 +275,13 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
 // Dreiecke in der Nähe der Kette (Abstand bis reach), um Profilendpunkte genau auf die Fläche zu legen;
 // blend: Dreieck einer vorhandenen Rundung/Fase
 function nearTriangles(mesh, chain, reach) {
-  const { fn } = analyze(mesh), { v, t } = mesh, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const { fn, tg, weld } = analyze(mesh), { v, t } = mesh, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (const q of chain.pts) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k] - reach); hi[k] = Math.max(hi[k], q[k] + reach); }
   const out = [];
   for (let ti = 0; ti < t.length / 3; ti++) {
     const c = [0, 1, 2].map(k => { const i = t[3 * ti + k] * 3; return [v[i], v[i + 1], v[i + 2]]; });
     if ([0, 1, 2].some(k => Math.max(c[0][k], c[1][k], c[2][k]) < lo[k] || Math.min(c[0][k], c[1][k], c[2][k]) > hi[k])) continue;
-    out.push({ c, n: [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]], blend: !!mesh.f && mesh.f[ti] >= 1 << 20, area: Math.hypot(...cross(sub(c[1], c[0]), sub(c[2], c[0]))) / 2 });
+    out.push({ c, n: [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]], tag: tg[ti], blend: tg[ti] > 0, w: [0, 1, 2].map(k => weld[t[3 * ti + k]]), area: Math.hypot(...cross(sub(c[1], c[0]), sub(c[2], c[0]))) / 2 });
   }
   return out;
 }
@@ -541,4 +541,171 @@ function cornerMesh(C, d, r, n, ext) {
   const vv = new Float32Array(verts.length * 3);
   verts.forEach((q, i) => vv.set(q, i * 3));
   return { v: vv, t: new Uint32Array(out), f: new Uint32Array(faces.length).map((_, i) => +(i < patch)) };
+}
+
+// ---------------------------------------------------------------- Übergang zwischen zwei Rundungen
+// Schneiden sich zwei Rundungen (z. B. obere und untere Lochkante, die sich an der flachen Stelle eines Lochs
+// in einer schrägen Fläche fast berühren), bleibt zwischen ihren Flächen eine Kante. creaseChains findet sie:
+// Kanten zwischen Dreiecken einer neuen (isNew) und einer schon vorhandenen Kennung, mit deutlichem Knick.
+// Rundungen aus demselben Schritt treffen sich an Ecken bewusst auf Gehrung (siehe cornerTools). Ergebnis: Ketten wie bei edgeChains (t1 auf der Seite tags[0]).
+const COS_CREASE = Math.cos(12 * Math.PI / 180);
+export function creaseChains(mesh, isNew) {
+  const { tg, fn, pairs } = analyze(mesh), byPair = new Map();
+  for (let k = 0; k < pairs.length; k += 4) {
+    const i = pairs[k], j = pairs[k + 1], a = tg[i], b = tg[j];
+    if (!a || !b || a === b || isNew(a) === isNew(b)) continue;
+    const key = Math.min(a, b) + ',' + Math.max(a, b);
+    if (!byPair.has(key)) byPair.set(key, []);
+    const g = { u: pairs[k + 2], v: pairs[k + 3], t1: i, t2: j };
+    byPair.get(key).push(a < b ? g : { u: g.v, v: g.u, t1: j, t2: i });
+  }
+  const v = mesh.v, P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]], out = [];
+  for (const [key, segs] of byPair) {
+    const from = new Map(segs.map(g => [g.u, g])), into = new Set(segs.map(g => g.v)), used = new Set();
+    for (const g0 of segs) {
+      if (used.has(g0) || (into.has(g0.u) && segs.some(g => !used.has(g) && !into.has(g.u)))) continue;
+      const list = [];
+      for (let g = g0; g && !used.has(g); g = from.get(g.v)) { used.add(g); list.push(g); }
+      const closed = list.length > 2 && list[list.length - 1].v === list[0].u;
+      const bend = Math.min(...list.map(g => fn[3 * g.t1] * fn[3 * g.t2] + fn[3 * g.t1 + 1] * fn[3 * g.t2 + 1] + fn[3 * g.t1 + 2] * fn[3 * g.t2 + 2]));
+      if (list.length < 2 || bend > COS_CREASE) continue;
+      out.push({ segs: list, closed, pts: [P(list[0].u), ...list.map(g => P(g.v))], tags: key.split(',').map(Number) });
+    }
+  }
+  return out;
+}
+
+// Werkzeug für den Übergang: Eine Kugel mit Radius R rollt an der Kante entlang und berührt beide (gekrümmten)
+// Rundungsflächen. Je Kantenpunkt wird ihr Mittelpunkt C in der Ebene quer zur Kante iterativ bestimmt
+// (Abstand R zu den nächsten Punkten beider Flächen). Wo die Flächen tangential zusammenlaufen (an den Enden
+// der Kante), wird das Profil beliebig klein; dort endet das Werkzeug.
+export function creaseTool(mesh, chain, R) {
+  return { ...creaseMesh(mesh, chain, R, 0), heal: creaseMesh(mesh, chain, R, GROW)?.mesh };
+}
+function creaseMesh(mesh, chain, R, grow) {
+  const { fn } = analyze(mesh), segs = chain.segs, m = segs.length, v = mesh.v;
+  const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]], nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
+  const convex = isConvex(mesh, chain), sgn = convex ? 1 : -1;
+  const near = nearTriangles(mesh, chain, 4 * R + 1);
+  // je Seite die Dreiecke der Rundungsfläche und geglättete Eckennormalen (die Facettennormalen springen)
+  const sides = chain.tags.map(tag => {
+    const tris = near.filter(f => f.tag === tag), vn = new Map();
+    for (const f of tris) for (const w of f.w) vn.set(w, add(vn.get(w) || [0, 0, 0], f.n, f.area));
+    for (const [w, n] of vn) vn.set(w, norm(n));
+    return { tris, vn };
+  });
+  // nächster Punkt der Fläche mit interpolierter Normale
+  const foot = (q, { tris, vn }) => {
+    let best = null, bd = Infinity;
+    for (const f of tris) { const c = closestOnTri(q, f.c), d = Math.hypot(...sub(c, q)); if (d < bd) { bd = d; best = { q: c, f }; } }
+    if (!best) return null;
+    const [a, b, c] = best.f.c, n0 = cross(sub(b, a), sub(c, a)), l2 = dot(n0, n0) || 1;
+    const wb = dot(cross(sub(best.q, a), sub(c, a)), n0) / l2, wc = dot(cross(sub(b, a), sub(best.q, a)), n0) / l2, wa = 1 - wb - wc;
+    const n = norm([0, 1, 2].map(k => wa * vn.get(best.f.w[0])[k] + wb * vn.get(best.f.w[1])[k] + wc * vn.get(best.f.w[2])[k]));
+    return { q: best.q, n };
+  };
+  // Die Kugel taucht unter dem Winkel DIP in die Flächen ein statt sie genau zu berühren: Tangential an einer
+  // facettierten Fläche wäre die Schnittlinie instabil und ausgefranst. Der Knick bleibt unter der Kantenschwelle.
+  const DIP = 6 * Math.PI / 180, Rs = R * Math.cos(DIP);
+  const prof = [];
+  const solve = (p, tau, C) => {
+    for (let it = 0; it < 10; it++) {
+      const A = foot(C, sides[0]), B = foot(C, sides[1]);
+      if (!A || !B) return null;
+      // nA·(C − A) = −sgn·Rs, nB·(C − B) = −sgn·Rs, tau·(C − p) = 0
+      const rows = [A.n, B.n, tau], rhs = [dot(A.n, A.q) - sgn * Rs, dot(B.n, B.q) - sgn * Rs, dot(tau, p)];
+      const det = dot(rows[0], cross(rows[1], rows[2]));
+      if (Math.abs(det) < 1e-3) return null;
+      const Cn = [cross(rows[1], rows[2]), cross(rows[2], rows[0]), cross(rows[0], rows[1])].reduce((acc, c, k) => add(acc, c, rhs[k] / det), [0, 0, 0]);
+      const step = Math.hypot(...sub(Cn, C));
+      C = Cn;
+      if (step < 1e-7) break;
+    }
+    return C;
+  };
+  // Die Schnittkante zweier facettierter Flächen ist eine Zickzacklinie; die Querschnitte kämen sonst schief.
+  // Daher gleichmäßig neu abtasten und glätten (Enden offener Kanten fest).
+  let pts = chain.pts.slice(0, chain.closed ? -1 : undefined);
+  const cum = [0];
+  for (let i = 1; i <= pts.length - (chain.closed ? 0 : 1); i++) cum.push(cum[i - 1] + Math.hypot(...sub(pts[i % pts.length], pts[i - 1])));
+  const len = cum[cum.length - 1], h = Math.max(0.03, Math.min(0.2, R / 3)), n = Math.max(2, Math.round(len / h));
+  const at = s0 => {
+    let k = 1;
+    while (k < cum.length - 1 && cum[k] < s0) k++;
+    const u = (s0 - cum[k - 1]) / ((cum[k] - cum[k - 1]) || 1);
+    return add(pts[k - 1], sub(pts[k % pts.length], pts[k - 1]), u);
+  };
+  pts = Array.from({ length: chain.closed ? n : n + 1 }, (_, k) => at(len * k / n));
+  const M = pts.length;
+  for (let it = 0; it < 6; it++) pts = pts.map((q, k) => {
+    const a = pts[k - 1] ?? (chain.closed ? pts[M - 1] : null), b = pts[k + 1] ?? (chain.closed ? pts[0] : null);
+    return a && b ? add(q.map(x => x * 0.5), add(a, b), 0.25) : q;
+  });
+  for (let i = 0; i < M; i++) {
+    const p = pts[i], a = pts[i - 1] ?? (chain.closed ? pts[M - 1] : p), b = pts[i + 1] ?? (chain.closed ? pts[0] : p);
+    const tau = norm(sub(b, a)), fa = foot(p, sides[0]), fb = foot(p, sides[1]);
+    if (!fa || !fb) { prof.push(null); continue; }
+    const N1 = fa.n, N2 = fb.n, t1 = norm(cross(N1, tau)), t2 = norm(cross(tau, N2)), alpha = Math.acos(Math.max(-1, Math.min(1, dot(t1, t2))));
+    const C = Math.PI - alpha < 0.02 ? null : solve(p, tau, add(p, norm(add(t1, t2)), R / Math.sin(alpha / 2)));
+    prof.push(C && Math.hypot(...sub(C, p)) < 4 * R ? { p, tau, C, N1, N2 } : null);
+  }
+  // längster zusammenhängender Abschnitt mit gültigen Profilen
+  let run = [], cur = [];
+  for (let i = 0; i < M; i++) { if (prof[i]) { cur.push(i); if (cur.length > run.length) run = cur.slice(); } else cur = []; }
+  const closedRun = chain.closed && run.length === M;
+  if (run.length < 2) return null;
+  // Bahn des Mittelpunkts glätten (Enden offener Abschnitte fest), in der Querebene halten
+  for (let it = 0; it < 6; it++) {
+    const next = run.map((i, k) => {
+      const a = run[k - 1] ?? (closedRun ? run[run.length - 1] : null), b = run[k + 1] ?? (closedRun ? run[0] : null);
+      if (a == null || b == null) return prof[i].C;
+      const c = add(prof[i].C.map(x => x * 0.5), add(prof[a].C, prof[b].C), 0.25);
+      return add(c, prof[i].tau, -dot(prof[i].tau, sub(c, prof[i].p)));
+    });
+    run.forEach((i, k) => { prof[i].C = next[k]; });
+  }
+  const angle = (a, b) => Math.acos(Math.max(-1, Math.min(1, dot(a, b))));
+  // Richtung vom Mittelpunkt zum Berührpunkt = Flächennormale (bei Innenkanten umgekehrt), dann um DIP von der
+  // Kante weg gekippt – fest aus Normale und Kantenrichtung, auch wo beide Flächen fast parallel laufen
+  const ends = run.map(i => {
+    const { C, tau } = prof[i], fa = foot(C, sides[0]), fb = foot(C, sides[1]);
+    const tA = norm(cross(fa.n, tau)), tB = norm(cross(tau, fb.n));
+    const eA = norm(add(fa.n.map(x => x * sgn * Math.cos(DIP)), tA, Math.sin(DIP))), eB = norm(add(fb.n.map(x => x * sgn * Math.cos(DIP)), tB, Math.sin(DIP)));
+    return { eA, eB, nA: fa.n, nB: fb.n };
+  });
+  const nArc = Math.max(3, ...ends.map(e => Math.round(angle(e.eA, e.eB) / (Math.PI / 24))));
+  // offene Enden auf der Länge R auf null verjüngen, statt abrupt mit einer Stufe zu enden
+  const sAt = run.map((i, k) => (k ? Math.hypot(...sub(prof[i].p, prof[run[k - 1]].p)) : 0)).reduce((acc, x) => [...acc, (acc[acc.length - 1] ?? 0) + x], []);
+  const taper = k => { if (closedRun) return 1; const e = Math.min(sAt[k], sAt[sAt.length - 1] - sAt[k]) / R; return e >= 1 ? 1 : Math.max(0.03, e * e * (3 - 2 * e)); };
+  const rings = run.map((i, k) => {
+    const { p, C, N1, N2 } = prof[i], { eA, eB, nA, nB } = ends[k];
+    const A = add(C, eA, R), B = add(C, eB, R), phi = angle(eA, eB), sp = Math.sin(phi) || 1;
+    const Q = add(p, add(N1, N2), sgn * EPS / Math.max(0.2, 1 + dot(N1, N2)));
+    const ring = [A, add(A, nA, sgn * EPS), Q, add(B, nB, sgn * EPS), B];
+    for (let j = 1; j < nArc; j++) {
+      const s = j / nArc, wa = phi > 1e-6 ? Math.sin(s * phi) / sp : s, wb = phi > 1e-6 ? Math.sin((1 - s) * phi) / sp : 1 - s;
+      ring.push(add(C, add(eA.map(x => x * wa), eB, wb), R));
+    }
+    if (grow) {
+      for (const j of [0, ...ring.keys()].filter(j => j === 0 || j >= 4)) ring[j] = add(ring[j], norm(sub(C, ring[j])), grow);
+      for (const [j, e] of [[0, A], [1, A], [3, B], [4, B]]) ring[j] = add(ring[j], norm(sub(e, p)), grow);
+    }
+    const f = taper(k);
+    return f < 1 ? ring.map(q => add(p, sub(q, p), f)) : ring;
+  });
+  return { convex, mesh: tube(rings, closedRun), trim: [] };
+}
+
+// Übergänge für frisch angelegte Rundungen (fresh: deren Kennungen) zu vorhandenen: je Schnittkante ein Werkzeug
+// mit dem halben Radius der kleineren Rundung (konvexe Rundungsflächen lassen höchstens ihren eigenen Radius zu).
+// Der Übergang hängt an beiden Rundungen (links) und verschwindet mit jeder von ihnen. tag: erste freie Kennung.
+export function transitionTools(mesh, features, fresh, tag) {
+  const byTag = new Map(features.map(f => [f.tag, f])), isNew = t => fresh.includes(t), out = [];
+  for (const c of creaseChains(mesh, isNew)) {
+    const [fa, fb] = c.tags.map(t => byTag.get(t));
+    if (fa?.kind !== 'fillet' || fb?.kind !== 'fillet') continue;
+    const R = 0.5 * Math.min(fa.size, fb.size), t = creaseTool(mesh, c, R);
+    if (t.mesh && t.heal) out.push(Object.assign(t, { tag: tag++, kind: 'transition', size: R, links: c.tags }));
+  }
+  return out;
 }

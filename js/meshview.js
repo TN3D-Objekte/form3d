@@ -4,6 +4,14 @@ import { planeFromNormal, to2D } from './sketch.js';
 const COS_EDGE = Math.cos(25 * Math.PI / 180);
 const COS_CREASE = Math.cos(40 * Math.PI / 180);
 const cacheMap = new WeakMap();
+// Übergänge zwischen zwei Rundungen je Netz ({ tag, links: [a, b] }): Ihre Ränder sind tangential und werden
+// nicht als Linie gezeichnet (sie verliefen auf den facettierten Rundungsflächen unruhig), ebenso die flache
+// Restkante zwischen a und b, wo der Übergang ausläuft. Vor analyze setzen.
+const seamless = new WeakMap();
+export function hideSeams(mesh, transitions) {
+  if (!transitions.length || cacheMap.has(mesh)) return;
+  seamless.set(mesh, { tags: new Set(transitions.map(x => x.tag)), pairs: new Set(transitions.map(x => Math.min(...x.links) + ',' + Math.max(...x.links))) });
+}
 
 export function analyze(mesh) {
   let an = cacheMap.get(mesh);
@@ -121,9 +129,10 @@ export function analyze(mesh) {
 
   // Übergangskanten: wo Rundung/Fase oder eine Krümmung tangential in eine andere Fläche übergeht, gibt
   // es keinen Knick; als dünne Linie zeigen sie trotzdem, wo die Fläche anfängt und aufhört
-  const soft = [];
+  const soft = [], hide = seamless.get(mesh);
   for (let k = 0; k < smooth.length; k += 2) {
     const i = smooth[k], j = smooth[k + 1], a = triFace[i], b = triFace[j];
+    if (hide && (hide.tags.has(tg[i]) || hide.tags.has(tg[j]) || hide.pairs.has(Math.min(tg[i], tg[j]) + ',' + Math.max(tg[i], tg[j])))) continue;
     if (a !== b && (tg[i] !== tg[j] || flat[a] || flat[b])) soft.push(smoothV[k], smoothV[k + 1]);
   }
 
@@ -152,7 +161,7 @@ export function analyze(mesh) {
   [...sharp, ...soft].forEach((vi, k) => edges.set(v.subarray(vi * 3, vi * 3 + 3), k * 3));
   const corners = [...cornerSet].map(i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]]);
 
-  an = { pos, nor, edges, triFace, faces, corners, fa, fn, tg, sharp, sharpTri, weld, smooth, nbr, flat };
+  an = { pos, nor, edges, triFace, faces, corners, fa, fn, tg, sharp, sharpTri, weld, smooth, nbr, flat, pairs };
   cacheMap.set(mesh, an);
   return an;
 }

@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import { Viewport } from './viewport.js';
 import * as K from './kernel.js';
 import * as S from './sketch.js';
-import { analyze, faceTriangles, faceCentroid, faceLoops, smoothSurface } from './meshview.js';
-import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains, restoredChains, isConvex } from './edges.js';
+import { analyze, faceTriangles, faceCentroid, faceLoops, smoothSurface, hideSeams } from './meshview.js';
+import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains, restoredChains, isConvex, transitionTools } from './edges.js';
 import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
@@ -92,6 +92,7 @@ function syncBodies() {
   for (const b of doc.bodies) {
     seen.add(b.id);
     let bv = views.get(b.id);
+    seams(b);
     if (!bv || bv.meshRef !== b.mesh) {
       if (bv) dropView(bv);
       const an = analyze(b.mesh);
@@ -247,7 +248,9 @@ function addBody(mesh) {
   doc.bodies.push(b);
   return b;
 }
-const patchBody = (id, patch) => { doc.bodies = doc.bodies.map(b => (b.id === id ? { ...b, ...patch } : b)); };
+const patchBody = (id, patch) => { doc.bodies = doc.bodies.map(b => (b.id === id ? seams({ ...b, ...patch }) : b)); };
+// Ränder von Übergängen zwischen Rundungen nicht als Linie zeichnen (vor der ersten Analyse des Netzes)
+function seams(b) { hideSeams(b.mesh, (b.features || []).filter(f => f.kind === 'transition' && f.links?.length === 2)); return b; }
 const removeBodies = ids => { doc.bodies = doc.bodies.filter(b => !ids.includes(b.id)); };
 
 function bboxOf(mesh, box = new THREE.Box3()) {
@@ -440,8 +443,9 @@ function applyOp() {
   if (o.type === 'bool') return applyBoolean(o);
   if (o.type === 'edge') {
     try {
-      const r = o.result();
+      let r = o.result();
       if (!r.mesh) throw new Error('leeres Ergebnis');
+      r = withTransitions(body(o.bodyId).features || [], r);
       patchBody(o.bodyId, { mesh: r.mesh, features: [...(body(o.bodyId).features || []), ...r.features] });
       o.restore = null;
     } catch (e) {
@@ -1207,7 +1211,7 @@ function renderBar() {
     }
     if (o.face) {
       sep();
-      if (sel.face?.feature) B('Bearbeiten', sel.face.feature.kind === 'chamfer' ? 'chamfer' : 'fillet', () => editFeature(sel.face.bodyId, sel.face.feature.tag));
+      if (sel.face?.feature && sel.face.feature.kind !== 'transition') B('Bearbeiten', sel.face.feature.kind === 'chamfer' ? 'chamfer' : 'fillet', () => editFeature(sel.face.bodyId, sel.face.feature.tag));
       B('Skizze', 'pencil', () => startDraw('line'));
       B('Körper', 'box', () => { const id = sel.face.bodyId; clearSel(); sel.bodies = [id]; selectionChanged(); });
       B(sel.face?.feature ? 'Löschen' : 'Körper löschen', 'trash', deleteSelection, 'danger');
@@ -1250,11 +1254,11 @@ function renderBar() {
     B('Löschen', 'trash', deleteSelection, 'danger', true);
   } else if (sel.face) {
     const f = sel.face.feature;
-    L(f ? (f.kind === 'chamfer' ? 'Fase' : 'Rundung') : 'Gekrümmte Fläche');
+    L(f ? ({ chamfer: 'Fase', transition: 'Übergang zwischen Rundungen' }[f.kind] || 'Rundung') : 'Gekrümmte Fläche');
     if (f) L('Löschen macht die Kante wieder scharf', true);
     sep();
     B('Körper', 'box', () => { const id = sel.face.bodyId; clearSel(); sel.bodies = [id]; selectionChanged(); });
-    if (f) B('Bearbeiten', f.kind === 'chamfer' ? 'chamfer' : 'fillet', () => editFeature(sel.face.bodyId, f.tag));
+    if (f && f.kind !== 'transition') B('Bearbeiten', f.kind === 'chamfer' ? 'chamfer' : 'fillet', () => editFeature(sel.face.bodyId, f.tag));
     B(f ? 'Löschen' : 'Körper löschen', 'trash', deleteSelection, 'danger');
   } else if (sel.edges.length) {
     L(sel.edges.length + (sel.edges.length > 1 ? ' Kanten' : ' Kante'));
@@ -1286,6 +1290,18 @@ function renderBar() {
     B('Skizze beenden', 'check', () => { endSketch(); sync(); }, 'primary');
   }
   UI.renderBar($('bar'), items);
+}
+
+// Schneidet eine neue Rundung eine vorhandene, wird die Schnittkante weich ausgerundet (Übergang, siehe edges.js).
+// Gelingt das nicht, bleibt die Kante – die Rundung selbst ist ja angelegt.
+function withTransitions(old, r) {
+  const all = [...old, ...r.features];
+  try {
+    const ts = transitionTools(r.mesh, all, r.features.map(f => f.tag), nextTag({ mesh: r.mesh, features: all }));
+    if (!ts.length) return r;
+    const t = K.blendFeatures(r.mesh, ts);
+    return t.mesh ? { mesh: t.mesh, features: [...r.features, ...t.features] } : r;
+  } catch (e) { console.warn('Übergang nicht möglich', e); return r; }
 }
 
 // Neue Kennungen für Rundungs-/Fasenflächen eines Körpers (12 Bit, siehe kernel.js)

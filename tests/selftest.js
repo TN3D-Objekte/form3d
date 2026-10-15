@@ -3,7 +3,7 @@ import * as K from '../js/kernel.js';
 import * as S from '../js/sketch.js';
 import { toFile, fromFile } from '../js/doc.js';
 import { exportSTL, export3MF } from '../js/exporters.js';
-import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains } from '../js/edges.js';
+import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains, transitionTools, creaseChains } from '../js/edges.js';
 import { analyze, faceLoops, smoothSurface } from '../js/meshview.js';
 import { solveSketch } from '../js/solver.js';
 import { checkPrint, bestOrientation } from '../js/printcheck.js';
@@ -462,6 +462,12 @@ try {
     const del = (r, i) => K.unblend(r.mesh, [r.feats[i]], r.feats.filter((_, k) => k !== i));
     const devs = [sd(tb.mesh, bt.mesh), sd(del(tb, 0), onlyBot.mesh), sd(del(tb, 1), onlyTop.mesh), sd(del(bt, 0), onlyTop.mesh), sd(del(bt, 1), onlyBot.mesh)];
     const extra = [del(tb, 0), del(bt, 1)].map(x => edgeChains(x).length - edgeChains(onlyBot.mesh).length);
+    // weicher Übergang: an der Schnittkante wird Material abgetragen, Löschen einer Rundung nimmt ihn mit
+    const all = [...tb.feats], ts = transitionTools(tb.mesh, all, [2], 3), tr = ts.length ? K.blendFeatures(tb.mesh, ts) : null;
+    const soft = tr && { mesh: tr.mesh, feats: [...all, ...tr.features] }, dl = (r, tag) => K.unblend(r.mesh, r.feats.filter(f => f.tag === tag || f.links?.includes(tag)), r.feats.filter(f => !(f.tag === tag || f.links?.includes(tag))));
+    const cut = soft ? vol(tb.mesh) - vol(soft.mesh) : 0, sdel = soft ? [sd(dl(soft, 1), onlyBot.mesh), sd(dl(soft, 2), onlyTop.mesh), sd(dl(soft, 3), tb.mesh)] : [];
+    log(soft && cut > 1e-3 && sdel.every(d => d < 1e-3) && creaseChains(soft.mesh, t => t === 3).every(c => c.tags.includes(3) || c.segs.length < 20),
+      `Übergang zwischen den Rundungen: ${ts.length} Werkzeug, abgetragen ${cut.toFixed(4)} mm³, nach Löschen oben/unten/Übergang Abweichung ${sdel.map(d => d.toFixed(4)).join(', ')}`);
     log(devs.every(d => d < 1e-3) && extra.every(e => e === 0), `Zwei sich berührende Rundungen: Abweichungen ${devs.map(d => d.toFixed(4)).join(', ')} mm³ (Reihenfolge, Löschen), zusätzliche Kanten ${extra}`);
   }
   // Kombinieren über die Leiste: Ziel, dann Werkzeug antippen; Abziehen, Tauschen + Schnitt, Vereinigen mit
