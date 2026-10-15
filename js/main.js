@@ -8,7 +8,7 @@ import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains, rest
 import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
-import { exportSTL, exportOBJ, download } from './exporters.js';
+import { exportSTL, exportOBJ, export3MF, download, share } from './exporters.js';
 import * as Bug from './bugrec.js';
 
 const $ = id => document.getElementById(id);
@@ -1296,6 +1296,8 @@ function openMenu() {
     { label: 'Projekt als Datei sichern', onClick: () => download(doc.name + '.form3d', toFile(), 'application/json') },
     { label: 'Projektdatei öffnen …', onClick: () => $('file').click() },
     '-',
+    { label: 'An Slicer senden (3MF) …', onClick: () => { const l = visible(); if (l.length) share(doc.name + '.3mf', export3MF(l), 'model/3mf'); } },
+    { label: 'Export 3MF (3D-Druck)', onClick: () => { const l = visible(); if (l.length) download(doc.name + '.3mf', export3MF(l), 'model/3mf'); } },
     { label: 'Export STL (3D-Druck)', onClick: () => { const l = visible(); if (l.length) download(doc.name + '.stl', exportSTL(l), 'model/stl'); } },
     { label: 'Export OBJ', onClick: () => { const l = visible(); if (l.length) download(doc.name + '.obj', exportOBJ(l), 'text/plain'); } },
     '-',

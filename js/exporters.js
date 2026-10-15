@@ -40,3 +40,69 @@ export function exportOBJ(bodies) {
   }
   return out.join('\n');
 }
+
+// ---- 3MF: ZIP (ungepackt) mit XML-Modell, Einheit mm, je Körper ein Objekt mit Name und Farbe ----
+const CRC = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xffffffff;
+  for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+// files: [{ name, data: Uint8Array }] → ZIP-Archiv (Methode „gespeichert“)
+export function zip(files) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  let off = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), crc = crc32(f.data), n = f.data.length;
+    const h = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [8, 0, 2], [14, crc, 4], [18, n, 4], [22, n, 4], [26, name.length, 2]].forEach(([o, x, s]) => (s === 4 ? h.setUint32(o, x, true) : h.setUint16(o, x, true)));
+    parts.push(new Uint8Array(h.buffer), name, f.data);
+    const c = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [16, crc, 4], [20, n, 4], [24, n, 4], [28, name.length, 2], [42, off, 4]].forEach(([o, x, s]) => (s === 4 ? c.setUint32(o, x, true) : c.setUint16(o, x, true)));
+    central.push(new Uint8Array(c.buffer), name);
+    off += 30 + name.length + n;
+  }
+  const size = central.reduce((s, p) => s + p.length, 0), e = new DataView(new ArrayBuffer(22));
+  [[0, 0x06054b50, 4], [8, files.length, 2], [10, files.length, 2], [12, size, 4], [16, off, 4]].forEach(([o, x, s]) => (s === 4 ? e.setUint32(o, x, true) : e.setUint16(o, x, true)));
+  const all = [...parts, ...central, new Uint8Array(e.buffer)], out = new Uint8Array(all.reduce((s, p) => s + p.length, 0));
+  let p = 0;
+  for (const a of all) { out.set(a, p); p += a.length; }
+  return out;
+}
+
+const xmlEsc = s => String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
+
+export function export3MF(bodies) {
+  const num = x => +x.toFixed(4);
+  const mats = bodies.map(b => `<base name="${xmlEsc(b.name)}" displaycolor="${(b.color || '#a9b4c4').toUpperCase()}FF"/>`).join('');
+  const objs = bodies.map((b, i) => {
+    const { v, t } = b.mesh, vs = [], ts = [];
+    for (let k = 0; k < v.length; k += 3) vs.push(`<vertex x="${num(v[k])}" y="${num(v[k + 1])}" z="${num(v[k + 2])}"/>`);
+    for (let k = 0; k < t.length; k += 3) ts.push(`<triangle v1="${t[k]}" v2="${t[k + 1]}" v3="${t[k + 2]}"/>`);
+    return `<object id="${i + 2}" name="${xmlEsc(b.name)}" type="model" pid="1" pindex="${i}"><mesh><vertices>${vs.join('')}</vertices><triangles>${ts.join('')}</triangles></mesh></object>`;
+  }).join('');
+  const items = bodies.map((_, i) => `<item objectid="${i + 2}"/>`).join('');
+  const model = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="de-DE" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Application">Form3D</metadata><resources><basematerials id="1">${mats}</basematerials>${objs}</resources><build>${items}</build></model>`;
+  const types = `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
+  const enc = new TextEncoder();
+  return zip([{ name: '[Content_Types].xml', data: enc.encode(types) }, { name: '_rels/.rels', data: enc.encode(rels) }, { name: '3D/3dmodel.model', data: enc.encode(model) }]);
+}
+
+// Datei über das Teilen-Menü des Geräts weitergeben (z. B. an eine Slicer-App), sonst herunterladen
+export async function share(name, data, type) {
+  const file = new File([data], name, { type });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return true; } catch (e) { if (e.name === 'AbortError') return true; }
+  }
+  download(name, data, type);
+  return false;
+}

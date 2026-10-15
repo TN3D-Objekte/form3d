@@ -2,7 +2,7 @@
 import * as K from '../js/kernel.js';
 import * as S from '../js/sketch.js';
 import { toFile, fromFile } from '../js/doc.js';
-import { exportSTL } from '../js/exporters.js';
+import { exportSTL, export3MF } from '../js/exporters.js';
 import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains } from '../js/edges.js';
 import { analyze, faceLoops, smoothSurface } from '../js/meshview.js';
 import { solveSketch } from '../js/solver.js';
@@ -329,6 +329,25 @@ try {
   fromFile(toFile());
   const after = doc.bodies.map(b => K.props(b.mesh).volume.toFixed(1)).join();
   log(before === after && doc.sketches.length === 2, 'Projektdatei-Rundlauf: ' + after);
+  // 3MF: ZIP-Verzeichnis lesen, Prüfsumme und Modell (Punkte/Dreiecke je Körper) wie ein Slicer prüfen
+  {
+    const z = export3MF(doc.bodies), dv = new DataView(z.buffer), dec = new TextDecoder(), files = {};
+    const eocd = z.length - 22, n = dv.getUint16(eocd + 10, true);
+    for (let i = 0, c = dv.getUint32(eocd + 16, true); i < n; i++) {
+      const len = dv.getUint32(c + 20, true), nl = dv.getUint16(c + 28, true), lo = dv.getUint32(c + 42, true);
+      const name = dec.decode(z.subarray(c + 46, c + 46 + nl)), start = lo + 30 + dv.getUint16(lo + 26, true);
+      files[name] = { data: z.subarray(start, start + len), crc: dv.getUint32(c + 16, true) };
+      c += 46 + nl;
+    }
+    const crcOk = Object.values(files).every(f => { let c = ~0; for (const b of f.data) { c ^= b; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; } return (~c >>> 0) === f.crc; });
+    const xml = new DOMParser().parseFromString(dec.decode(files['3D/3dmodel.model']?.data || new Uint8Array()), 'application/xml');
+    const objs = [...xml.getElementsByTagName('object')];
+    const counts = objs.map(o => [o.getElementsByTagName('vertex').length, o.getElementsByTagName('triangle').length]);
+    const ok = crcOk && files['[Content_Types].xml'] && files['_rels/.rels'] && !xml.getElementsByTagName('parsererror').length
+      && xml.documentElement.getAttribute('unit') === 'millimeter' && objs.length === doc.bodies.length
+      && counts.every(([nv, nt], i) => nv === doc.bodies[i].mesh.v.length / 3 && nt === doc.bodies[i].mesh.t.length / 3);
+    log(ok, `3MF: ${Object.keys(files).length} Dateien, Prüfsummen ${crcOk ? 'ok' : 'falsch'}, ${objs.length} Körper ${JSON.stringify(counts)}`);
+  }
   const fb = doc.bodies[1], vUn = K.props(K.unblend(fb.mesh, fb.features)).volume;
   log(doc.bodies.map(b => b.features?.length || 0).join() === featsBefore && K.maxTag(fb.mesh) > 0 && Math.abs(vUn - vE) < 0.5, `Rundlauf erhält Fase (löschbar): ${featsBefore}, V ohne Fase ${vUn.toFixed(1)}`);
 
