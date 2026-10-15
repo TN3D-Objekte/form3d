@@ -1456,6 +1456,7 @@ function appState() {
 
 // Aufzeichnung abspielen (tests/replay.js): Ausgangszustand herstellen
 function replayStart(r) {
+  $('help').hidden = true;
   resetSession();
   endSketch();
   setSelectTool();

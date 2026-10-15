@@ -84,12 +84,12 @@ export function analyze(mesh) {
   const par = new Int32Array(nT);
   for (let i = 0; i < nT; i++) par[i] = i;
   const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
-  const sharp = [], sharpTri = [], smooth = [];
+  const sharp = [], sharpTri = [], smooth = [], smoothV = [];
   for (let k = 0; k < pairs.length; k += 4) {
     const i = pairs[k], j = pairs[k + 1], d = fdot(i, j);
-    if (d > 0.99999) par[find(i)] = find(j);
+    if (d > 0.99999 && tg[i] === tg[j]) par[find(i)] = find(j);
     else if (d < COS_EDGE && !(tg[i] && tg[i] === tg[j])) { sharp.push(pairs[k + 2], pairs[k + 3]); sharpTri.push(i, j); } // Dreieck i enthält die Halbkante a→b
-    else smooth.push(i, j);
+    else { smooth.push(i, j); smoothV.push(pairs[k + 2], pairs[k + 3]); }
   }
 
   const triFace = new Int32Array(nT), faces = [], rootIdx = new Map();
@@ -101,6 +101,28 @@ export function analyze(mesh) {
     f.tris.push(i);
     if (fa[i] > f.big) { f.big = fa[i]; f.n = [fn[3 * i], fn[3 * i + 1], fn[3 * i + 2]]; f.tag = tg[i]; }
     triFace[i] = fi;
+  }
+
+  // Nachbarflächen über glatte Kanten. Ohne Kennung gelten große ebene Flächen, die nur tangential an
+  // Facetten anschließen (Rundung neben Fase oder Deckfläche), als eben: Facetten einer Krümmung sind
+  // ähnlich groß wie ihre Nachbarn.
+  const nbr = faces.map(() => []);
+  for (let k = 0; k < smooth.length; k += 2) {
+    const a = triFace[smooth[k]], b = triFace[smooth[k + 1]];
+    if (a !== b && !nbr[a].includes(b)) { nbr[a].push(b); nbr[b].push(a); }
+  }
+  const area = faces.map(f => f.tris.reduce((s, ti) => s + fa[ti], 0));
+  const flat = faces.map((f, i) => {
+    const ns = nbr[i].map(g => area[g]).sort((a, b) => a - b);
+    return !f.tag && ns.length > 0 && area[i] > 8 * ns[ns.length >> 1];
+  });
+
+  // Übergangskanten: wo Rundung/Fase oder eine Krümmung tangential in eine andere Fläche übergeht, gibt
+  // es keinen Knick; als dünne Linie zeigen sie trotzdem, wo die Fläche anfängt und aufhört
+  const soft = [];
+  for (let k = 0; k < smooth.length; k += 2) {
+    const i = smooth[k], j = smooth[k + 1], a = triFace[i], b = triFace[j];
+    if (a !== b && (tg[i] !== tg[j] || flat[a] || flat[b])) soft.push(smoothV[k], smoothV[k + 1]);
   }
 
   // Normalen je Ecke über angrenzende Dreiecke innerhalb des Knickwinkels mitteln
@@ -123,34 +145,21 @@ export function analyze(mesh) {
     nor[o] = nx / l; nor[o + 1] = ny / l; nor[o + 2] = nz / l;
   }
 
-  const edges = new Float32Array(sharp.length * 3);
+  const edges = new Float32Array((sharp.length + soft.length) * 3);
   const cornerSet = new Set(sharp);
-  for (let k = 0; k < sharp.length; k++) edges.set(v.subarray(sharp[k] * 3, sharp[k] * 3 + 3), k * 3);
+  [...sharp, ...soft].forEach((vi, k) => edges.set(v.subarray(vi * 3, vi * 3 + 3), k * 3));
   const corners = [...cornerSet].map(i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]]);
 
-  an = { pos, nor, edges, triFace, faces, corners, fa, fn, tg, sharp, sharpTri, weld, smooth };
+  an = { pos, nor, edges, triFace, faces, corners, fa, fn, tg, sharp, sharpTri, weld, smooth, nbr, flat };
   cacheMap.set(mesh, an);
   return an;
 }
 
 // Zusammenhängende glatte Fläche (z. B. Zylindermantel, Rundung) um die ebene Teilfläche fi: über
-// nicht scharfe Kanten verbunden und mit gleicher Rundungs-/Fasenkennung (mesh.f, obere 12 Bit).
-// Ohne Kennung gehören große ebene Flächen, die nur tangential an Facetten anschließen (Rundung neben
-// Fase oder Deckfläche), nicht dazu: Facetten einer Krümmung sind ähnlich groß wie ihre Nachbarn.
+// nicht scharfe Kanten verbunden, mit gleicher Rundungs-/Fasenkennung (mesh.f, obere 12 Bit) und ohne
+// große ebene Flächen (an.flat).
 export function smoothSurface(mesh, an, fi) {
   const t0 = an.faces[fi].tag;
-  if (!an.nbr) {
-    an.nbr = an.faces.map(() => []);
-    for (let k = 0; k < an.smooth.length; k += 2) {
-      const a = an.triFace[an.smooth[k]], b = an.triFace[an.smooth[k + 1]];
-      if (a !== b && !an.nbr[a].includes(b)) { an.nbr[a].push(b); an.nbr[b].push(a); }
-    }
-    const area = an.faces.map(f => f.tris.reduce((s, ti) => s + an.fa[ti], 0));
-    an.flat = an.faces.map((f, i) => {
-      const ns = an.nbr[i].map(g => area[g]).sort((a, b) => a - b);
-      return !f.tag && ns.length > 0 && area[i] > 8 * ns[ns.length >> 1];
-    });
-  }
   if (an.flat[fi]) return [fi];
   const seen = new Set([fi]), todo = [fi];
   while (todo.length) for (const g of an.nbr[todo.pop()]) {
