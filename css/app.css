@@ -158,7 +158,7 @@ button:disabled { opacity: 0.32; cursor: default; }
 .rec-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 #gridchip {
-  position: fixed; left: var(--left); bottom: var(--bottom); z-index: 2; pointer-events: none;
+  position: fixed; right: var(--right); bottom: var(--bottom); z-index: 2; pointer-events: none;
   background: var(--surface); box-shadow: var(--shadow); border-radius: 999px; padding: 6px 12px;
   font-size: 13px; font-weight: 600; color: var(--muted); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
@@ -177,6 +177,24 @@ button:disabled { opacity: 0.32; cursor: default; }
 #check button { height: 34px; padding: 0 12px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 650; }
 #check button.plain { background: rgba(17, 24, 39, 0.06); color: var(--text); padding: 0 9px; }
 .top-btn.on { background: var(--accent); color: #fff; }
+
+/* ---- Leisten anordnen ---- */
+#arrange-shade { position: fixed; inset: 0; z-index: 20; background: rgba(17, 24, 39, 0.18); }
+.arranging #topbar { z-index: 21; }
+.arranging .lay-item { z-index: 21; pointer-events: auto !important; cursor: move; outline: 2px dashed var(--accent); outline-offset: 2px; touch-action: none; }
+.arranging .lay-item * { pointer-events: none; }
+.arranging #panel { transition: none; }
+.ph { display: grid; place-items: center; font-weight: 650; color: var(--muted); padding: 0 14px; min-height: 40px; }
+.ph-bar { width: 300px; max-width: 70vw; height: 44px; }
+.ph-numpad { height: 300px; }
+.ph-toast { color: #fff; min-height: 0; padding: 0; }
+#arrange {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 22;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 20px);
+  background: rgba(17, 24, 39, 0.92); color: #fff; padding: 6px 6px 6px 16px; border-radius: 999px; font-weight: 600; box-shadow: var(--shadow);
+}
+#arrange button { height: 38px; padding: 0 16px; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 650; }
+#arrange button.plain { background: rgba(255, 255, 255, 0.16); }
 
 #loading { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: var(--bg); font-weight: 600; color: var(--muted); padding: 24px; text-align: center; }
 

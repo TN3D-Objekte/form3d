@@ -182,12 +182,13 @@ export function showHelp(device = 'tablet', onDevice) {
         h('button', { class: d === device ? 'on' : '', onclick: () => onDevice?.(d) }, label)))),
     h('div', { class: 'help-grid', html: `
       <div><h3>Navigieren</h3><ul>
-        ${NAV[device] || NAV.tablet}</ul></div>
+        ${NAV[device] || NAV.tablet}
+        <li><b>Menü → Leisten anordnen</b> – Leisten und Meldungen verschieben, getrennt für Hoch- und Querformat</li></ul></div>
       <div><h3>Skizzieren</h3><ul>
         <li>Linie, Rechteck, Kreis oder Bogen wählen, dann <b>Ebene oder Körperfläche antippen</b></li>
         <li>${device === 'pc' ? 'Mit der Maus' : device === 'phone' ? 'Mit einem Finger' : 'Mit dem <b>Apple Pencil</b> (ohne Stift mit dem Finger)'} zeichnen: ziehen oder Punkt für Punkt tippen</li>
         <li>Maße nach dem Zeichnen in der Leiste unten antippen und exakt eingeben</li>
-        <li>Orange Marken zeigen <b>Kantenmitten</b> (Dreieck) und <b>Mittelpunkte</b> (Kreuz) – darauf wird gefangen; die Rasterweite steht unten links</li>
+        <li>Orange Marken zeigen <b>Kantenmitten</b> (Dreieck) und <b>Mittelpunkte</b> (Kreuz) – darauf wird gefangen; die Rasterweite steht unten rechts</li>
         <li><b>Punkte und Linien ziehen</b>, um die Skizze zu ändern; Linie oder Kreis antippen für Bedingungen (horizontal, parallel, gleich, tangential …)</li></ul></div>
       <div><h3>Körper formen</h3><ul>
         <li><b>Skizzenfläche antippen</b> und am Pfeil ziehen – extrudieren</li>

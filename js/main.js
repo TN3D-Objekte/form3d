@@ -8,6 +8,7 @@ import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains, rest
 import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
+import * as Layout from './layout.js';
 import { exportSTL, exportOBJ, export3MF, download, share } from './exporters.js';
 import * as Bug from './bugrec.js';
 import { checkPrint, bestOrientation, OVER, THIN, GAP, LIMITS } from './printcheck.js';
@@ -1360,13 +1361,13 @@ function renderTop() {
 function buildTop() {
   const B = (id, ic, label, onClick, text) => UI.h('button', { id, class: 'top-btn' + (text ? ' text' : ''), title: label, 'aria-label': label, onclick: onClick, html: text ? `<span>${text}</span>` : UI.icon(ic) });
   $('topbar').append(
-    UI.h('div', { class: 'top-group' },
+    UI.h('div', { id: 'top-file', class: 'top-group' },
       B('btn-menu', 'menu', 'Menü', openMenu),
       UI.h('button', { id: 'doc-name', class: 'doc-name', title: 'Projekt umbenennen', onclick: () => { const n = prompt('Projektname', doc.name); if (n) { doc.name = n.trim() || doc.name; commit(); } } })),
-    UI.h('div', { class: 'top-group' },
+    UI.h('div', { id: 'top-hist', class: 'top-group' },
       B('btn-undo', 'undo', 'Rückgängig', doUndo),
       B('btn-redo', 'redo', 'Wiederholen', doRedo)),
-    UI.h('div', { class: 'top-group' },
+    UI.h('div', { id: 'top-view', class: 'top-group' },
       B('', '', 'Isometrisch', () => vp.setView('iso'), 'Iso'),
       B('', '', 'Von oben', () => vp.setView('top'), 'Oben'),
       B('', '', 'Von vorne', () => vp.setView('front'), 'Vorne'),
@@ -1457,6 +1458,7 @@ function openMenu() {
     { label: 'Export OBJ', onClick: () => { const l = visible(); if (l.length) download(doc.name + '.obj', exportOBJ(l), 'text/plain'); } },
     '-',
     { label: 'Gerät: ' + DEVICES[vp.device] + ' …', onClick: showHelp },
+    { label: 'Leisten anordnen …', onClick: Layout.arrange },
     { label: 'Kurzanleitung', onClick: showHelp },
     Bug.recording() ? null : { label: 'Fehler aufzeichnen …', onClick: () => Bug.start({ vp, state: appState, toFile }) },
     { label: 'Datenschutz & Lizenzen', onClick: () => { location.href = 'datenschutz.html'; } },
@@ -1700,6 +1702,7 @@ async function init() {
   try { saved = localStorage.getItem('form3d-device'); } catch { /* privater Modus */ }
   vp.device = DEVICES[saved] ? saved : guessDevice();
   if (innerWidth < 760) $('panel').classList.add('closed');
+  Layout.init();
   vp.onPen = () => { if (vp.device === 'tablet') UI.toast('Apple Pencil erkannt – der Stift zeichnet, Finger navigieren'); };
   await K.initKernel();
   let waiting = true; // blockierte Datenbank darf den Start nicht aufhalten
