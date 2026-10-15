@@ -436,10 +436,18 @@ try {
       let m = K.boolean('subtract', K.primitive('box', { l: 60, b: 60, h: 40 }), rotX(K.primitive('box', { l: 200, b: 200, h: 100 })));
       m = K.boolean('subtract', m, K.transform(K.primitive('cyl', { d: 20, h: 100 }), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -10, 1]));
       const all = edgeChains(m), top = all.filter(c => c.closed).sort((p, q) => q.pts.reduce((s, x) => s + x[2], 0) / q.pts.length - p.pts.reduce((s, x) => s + x[2], 0) / p.pts.length)[0];
-      const f = K.blend(m, [buildEdgeTool(m, top, 'fillet', r)]);
-      res.push([deg, all.length, edgeChains(f).length]);
+      const bf = K.blendFeatures(m, [Object.assign(buildEdgeTool(m, top, 'fillet', r), { tag: 1, kind: 'fillet', size: r })]);
+      const back = K.unblend(bf.mesh, bf.features, []);
+      res.push([deg, all.length, edgeChains(bf.mesh).length, edgeChains(back).length]);
     }
-    log(res.every(([, n0, n1]) => n1 <= n0), `Loch in schräger Fläche verrundet: Kanten vorher/nachher ${res.map(x => x[0] + '°: ' + x[1] + '/' + x[2]).join(', ')} (Zacken ergäben viele zusätzliche Kanten)`);
+    { // wie in einer Fehlermeldung: 45°-Keil 10 × 8 × 10, Loch ⌀4,5 senkrecht von unten, Rundung R1
+      let m = K.extrude([{ outer: [[0, 0], [10, 0], [10, 10]], holes: [] }], { o: [0, 0, 0], x: [1, 0, 0], y: [0, 0, 1], n: [0, -1, 0] }, 8);
+      m = K.boolean('subtract', m, K.transform(K.primitive('cyl', { d: 4.5, h: 30 }), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, -4, -5, 1]));
+      const all = edgeChains(m), top = all.filter(c => c.closed && c.pts.some(p => p[2] > 1))[0];
+      const bf = K.blendFeatures(m, [Object.assign(buildEdgeTool(m, top, 'fillet', 1), { tag: 1, kind: 'fillet', size: 1 })]);
+      res.push(['Keil 45', all.length, edgeChains(bf.mesh).length, edgeChains(K.unblend(bf.mesh, bf.features, [])).length]);
+    }
+    log(res.every(([, n0, n1, n2]) => n1 <= n0 && n2 === n0), `Loch in schräger Fläche verrundet und wieder gelöscht: Kanten vorher/verrundet/gelöscht ${res.map(x => x[0] + '°: ' + x.slice(1).join('/')).join(', ')} (Zacken oder Splitter ergäben zusätzliche Kanten)`);
   }
   // Kombinieren über die Leiste: Ziel, dann Werkzeug antippen; Abziehen, Tauschen + Schnitt, Vereinigen mit
   // verrundeten Körpern (Kennungen bleiben eindeutig, Rundung lässt sich danach noch auswählen)

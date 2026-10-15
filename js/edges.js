@@ -169,7 +169,7 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
   const convex = isConvex(mesh, chain), sgn = convex ? 1 : -1;
 
   const M = chain.closed ? m : m + 1;
-  const surf = { tris: nearTriangles(mesh, chain, 12 * size + 1), lines: surfaceLines(mesh, chain) };
+  const surf = nearTriangles(mesh, chain, 12 * size + 1);
   let nArc = 0;
   const rings = [];
   for (let i = 0; i < M; i++) {
@@ -177,8 +177,7 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
     const sum = f => norm(near.map(f).reduce((a, b) => add(a, b)));
     const tau = sum(k => dirs[k]), N1 = sum(k => nrm(segs[k].t1)), N2 = sum(k => nrm(segs[k].t2));
     const p = i < m ? P(segs[i].u) : P(segs[m - 1].v);
-    const vi = i < m ? segs[i].u : segs[m - 1].v;
-    const pr = profile(p, tau, N1, N2, kind, size, sgn, grow, nArc, surf && { tris: surf.tris, lines: surf.lines.get(vi) || [] }), { t1, t2, d } = pr;
+    const pr = profile(p, tau, N1, N2, kind, size, sgn, grow, nArc, surf), { t1, t2, d } = pr;
     nArc = pr.nArc;
     if (near.length === 2) { // Krümmung der Kante: Werkzeug darf auf der Innenseite nicht überschlagen (Radius gleich dem Kantenradius geht: Kugelecke)
       // Boolesche Ergebnisse zerteilen Kanten oft in winzige Stücke (z. B. an einer Fase), auf die sich dann
@@ -270,27 +269,8 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
   return { convex, mesh: tube(rings, chain.closed), trim };
 }
 
-// Netzkanten, die von den Punkten der Kette aus in die angrenzenden Flächen laufen (je Punkt Richtung, Länge
-// und Normale des Dreiecks). Bei einer facettierten Lochwand sind das u. a. die Mantellinien.
-function surfaceLines(mesh, chain) {
-  const { fn, weld } = analyze(mesh), { v, t } = mesh, P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
-  const pts = new Set(chain.segs.flatMap(g => [g.u, g.v])), out = new Map();
-  for (let ti = 0; ti < t.length / 3; ti++) {
-    const w = [0, 1, 2].map(k => weld[t[3 * ti + k]]);
-    for (let k = 0; k < 3; k++) {
-      if (!pts.has(w[k])) continue;
-      const p = P(w[k]), n = [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
-      if (!out.has(w[k])) out.set(w[k], []);
-      for (const o of [w[(k + 1) % 3], w[(k + 2) % 3]]) {
-        const e = sub(P(o), p), len = Math.hypot(...e);
-        if (len > 1e-6) out.get(w[k]).push({ dir: e.map(x => x / len), len, n });
-      }
-    }
-  }
-  return out;
-}
-
-// Dreiecke in der Nähe der Kette (Abstand bis reach), um Profilendpunkte genau auf die Fläche zu legen
+// Dreiecke in der Nähe der Kette (Abstand bis reach), um Profilendpunkte genau auf die Fläche zu legen;
+// blend: Dreieck einer vorhandenen Rundung/Fase
 function nearTriangles(mesh, chain, reach) {
   const { fn } = analyze(mesh), { v, t } = mesh, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (const q of chain.pts) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k] - reach); hi[k] = Math.max(hi[k], q[k] + reach); }
@@ -298,7 +278,7 @@ function nearTriangles(mesh, chain, reach) {
   for (let ti = 0; ti < t.length / 3; ti++) {
     const c = [0, 1, 2].map(k => { const i = t[3 * ti + k] * 3; return [v[i], v[i + 1], v[i + 2]]; });
     if ([0, 1, 2].some(k => Math.max(c[0][k], c[1][k], c[2][k]) < lo[k] || Math.min(c[0][k], c[1][k], c[2][k]) > hi[k])) continue;
-    out.push({ c, n: [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]] });
+    out.push({ c, n: [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]], blend: !!mesh.f && mesh.f[ti] >= 1 << 20, area: Math.hypot(...cross(sub(c[1], c[0]), sub(c[2], c[0]))) / 2 });
   }
   return out;
 }
@@ -344,37 +324,56 @@ function profile(p, tau, N1, N2, kind, size, sgn, grow, nArc = 0, surf) {
   }
   // Steht die Kante schräg zu einer gekrümmten, facettierten Fläche (z. B. Loch in einer schrägen Fläche),
   // reicht der Endpunkt A bzw. B im Profilschnitt seitlich über seine Facette hinaus und liegt minimal im
-  // Material – das Werkzeug kerbt dann je Facette die Fläche ein. Deshalb wird er auf die Netzkante gelegt,
-  // die von p aus am ehesten in seine Richtung läuft (bei einem Loch die Mantellinie; dann liegt der Rand des
-  // Werkzeugs zwischen zwei Profilen genau in der Facette), sonst auf den nächsten Punkt der Fläche. Der Bogen
-  // wird anteilig mitgeführt. Ebene Flächen bleiben unberührt.
+  // Material – das Werkzeug kerbt dann je Facette die Fläche ein. Ist die Fläche extrudiert (alle Facetten in
+  // der Nähe senkrecht zu einer Achse, z. B. Lochwand), wird der Endpunkt auf die Linie parallel zur Achse
+  // durch p gelegt; sie liegt genau auf der Fläche, und benachbarte Profile enden in derselben Facette.
+  // Vorhandene Rundungen in der Nähe zählen dabei nicht mit, sonst wechselte das Verfahren von Profil zu Profil.
+  // Sonst kommt er auf den nächsten Punkt der Fläche. Der Bogen wird anteilig mitgeführt (erst nach grow, das
+  // sich auf den Mittelpunkt C des unverschobenen Bogens bezieht). Ebene Flächen bleiben unberührt.
+  const nArcPts = ring.length - 5, sides = [[N1, N2, t1, 0, 1, j => (j - 4) / (nArcPts + 1)], [N2, N1, t2, 4, 3, j => 1 - (j - 4) / (nArcPts + 1)]];
+  const shifts = [null, null];
   if (surf) {
-    const nArcPts = ring.length - 5;
-    for (const [N, No, tt, end, eps, w] of [[N1, N2, t1, 0, 1, j => (j - 4) / (nArcPts + 1)], [N2, N1, t2, 4, 3, j => 1 - (j - 4) / (nArcPts + 1)]]) {
-      const side = f => { const c = dot(f.n, N); return c >= 0.3 && c > dot(f.n, No); };
-      const x = sub(ring[end], p);
-      if (surf.lines.every(l => !side(l) || Math.abs(dot(l.n, x)) < 1e-4)) continue;
-      let to = null, bc = 0.35;
-      for (const l of surf.lines) {
-        const c = dot(l.dir, tt);
-        if (side(l) && c > bc && l.len * c >= d * 0.999) { bc = c; to = add(p, l.dir, d / c); }
+    for (const [si, [N, No, tt, end]] of sides.entries()) {
+      const reach = 2 * d + 1, ns = [];
+      for (const f of surf) {
+        const c = dot(f.n, N);
+        // winzige Dreiecke (Splitter aus Booleschen Operationen) haben ungenaue Normalen
+        if (f.blend || f.area < 1e-3 || c < 0.9 || c <= dot(f.n, No) || f.c.every(q => Math.hypot(...sub(q, p)) > reach)) continue;
+        if (!ns.some(n => dot(n, f.n) > 1 - 1e-9)) ns.push(f.n);
+      }
+      let lo = 1, ax = null;
+      for (let a = 0; a < ns.length; a++) for (let b = a + 1; b < ns.length; b++) { const c = dot(ns[a], ns[b]); if (c < lo) { lo = c; ax = norm(cross(ns[a], ns[b])); } }
+      if (lo > 0.99996) continue; // eben (Facetten weniger als 0,5° gegeneinander geneigt)
+      let to = null;
+      if (ns.every(n => Math.abs(dot(n, ax)) < 2e-3)) {
+        const c = dot(ax, tt);
+        if (Math.abs(c) > 0.2) to = add(p, ax, d / c);
       }
       if (!to) {
         let bd = 0.3 * d;
-        for (const f of surf.tris) {
-          if (!side(f)) continue;
+        for (const f of surf) {
+          const c = dot(f.n, N);
+          if (c < 0.9 || c <= dot(f.n, No)) continue;
           const q = closestOnTri(ring[end], f.c), dd = Math.hypot(...sub(q, ring[end]));
           if (dd < bd) { bd = dd; to = q; }
         }
       }
-      if (!to) continue;
-      const shift = sub(to, ring[end]);
-      ring[end] = to;
-      ring[eps] = add(ring[eps], shift);
-      for (let j = 5; j < ring.length; j++) ring[j] = add(ring[j], shift, w(j));
+      if (to) shifts[si] = { shift: sub(to, ring[end]), out: norm(sub(to, p)) };
     }
   }
-  if (grow) for (const j of [0, 4, ...ring.keys()].filter((j, k, a) => (j === 0 || j >= 4) && a.indexOf(j) === k)) ring[j] = add(ring[j], toward(ring[j]), grow);
+  if (grow) {
+    for (const j of [0, 4, ...ring.keys()].filter((j, k, a) => (j === 0 || j >= 4) && a.indexOf(j) === k)) ring[j] = add(ring[j], toward(ring[j]), grow);
+    // auch seitlich über A und B hinaus: sonst endet das gemerkte Volumen auf der Fläche genau an derselben Linie
+    // wie die Rundung, und beim Zurückfügen bleiben dort hauchdünne Splitter stehen
+    for (const [si, [, , tt, end, eps]] of sides.entries()) for (const j of [end, eps]) ring[j] = add(ring[j], shifts[si]?.out || tt, grow);
+  }
+  for (const [si, [, , , end, eps, w]] of sides.entries()) {
+    const sh = shifts[si]?.shift;
+    if (!sh) continue;
+    ring[end] = add(ring[end], sh);
+    ring[eps] = add(ring[eps], sh);
+    for (let j = 5; j < ring.length; j++) ring[j] = add(ring[j], sh, w(j));
+  }
   return { ring, nArc, t1, t2, d };
 }
 
