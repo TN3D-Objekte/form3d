@@ -156,10 +156,10 @@ function edgeTool(mesh, chain, kind, size, grow) {
     const p = i < m ? P(segs[i].u) : P(segs[m - 1].v);
     const alpha = Math.acos(Math.max(-1, Math.min(1, dot(t1, t2))));
     const d = kind === 'fillet' ? size / Math.tan(alpha / 2) : size;
-    if (near.length === 2) { // Krümmung der Kante: Werkzeug darf auf der Innenseite nicht überschlagen
+    if (near.length === 2) { // Krümmung der Kante: Werkzeug darf auf der Innenseite nicht überschlagen (Radius gleich dem Kantenradius geht: Kugelecke)
       const kv = sub(dirs[near[1]], dirs[near[0]]), sl = s => Math.hypot(...sub(P(segs[s].v), P(segs[s].u)));
       const k = Math.hypot(...kv) / ((sl(near[0]) + sl(near[1])) / 2);
-      if (k > 1e-9 && [t1, t2].some(tt => dot(tt, norm(kv)) > 0.5) && d > 0.98 / k) throw new Error('Radius zu groß für diese Kante');
+      if (k > 1e-9 && [t1, t2].some(tt => dot(tt, norm(kv)) > 0.5) && d > 1.001 / k) throw new Error('Radius zu groß für diese Kante');
     }
     const A = add(p, t1, d), B = add(p, t2, d);
     const Q = add(p, add(N1, N2), sgn * EPS / Math.max(0.2, 1 + dot(N1, N2)));

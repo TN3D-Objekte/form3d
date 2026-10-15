@@ -3,7 +3,7 @@ import * as K from '../js/kernel.js';
 import * as S from '../js/sketch.js';
 import { toFile, fromFile } from '../js/doc.js';
 import { exportSTL } from '../js/exporters.js';
-import { edgeChains, buildEdgeTool, cornerTools } from '../js/edges.js';
+import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains } from '../js/edges.js';
 import { analyze, faceLoops, smoothSurface } from '../js/meshview.js';
 import { solveSketch } from '../js/solver.js';
 const { doc, vp, st, sel, railPick, applyOp } = window.form3d;
@@ -115,9 +115,7 @@ try {
   // Körper wählen (Doppeltipp), vereinigen, rückgängig
   vp.setView('iso'); await wait(500);
   const p = scr(80, -60, 6); tap(...p); tap(...p);
-  log(sel.bodies.length === 1 && sel.bodies[0] === b2.id, 'Doppeltipp wählt Körper');
-  document.querySelector('[data-tool=move]').click();
-  log(!!st.xf && vp.gizmo.object != null, 'Bewegen-Gizmo aktiv');
+  log(sel.bodies.length === 1 && sel.bodies[0] === b2.id && !!st.xf && vp.gizmo.object != null, 'Doppeltipp wählt Körper und startet Bewegen');
   [...document.querySelectorAll('#bar .chip')][0].click();
   for (const k of ['2', '5', 'OK']) [...document.querySelectorAll('#numpad .np-keys button')].find(b => b.textContent === k).click();
   const bb = doc.bodies.find(b => b.id === b2.id).mesh.v; let minx = 1e9; for (let i = 0; i < bb.length; i += 3) minx = Math.min(minx, bb[i]);
@@ -230,6 +228,21 @@ try {
   const vBack = K.props(K.unblend(delA.mesh, delA.keep, [])).volume;
   const vOld = K.props(K.unblend(fB.mesh, fA.features, fB.features.map(f => ({ ...f, tool: undefined })))).volume; // Verhalten ohne Werkzeug
   log(Math.abs(vCorner - onlyB) < 1 && Math.abs(vBack - 125000) < 1 && vOld - onlyB > 1, `Erste von zwei Eckrundungen gelöscht: V ${vCorner.toFixed(1)} (Soll ${onlyB.toFixed(1)}, ohne Nachschneiden ${vOld.toFixed(1)}), danach zweite gelöscht: ${vBack.toFixed(1)} (Soll 125000)`);
+
+  // Kette um eine vorhandene 2-mm-Rundung herum mit gleichem Radius 2 mm (Grenzfall: Kugelecke)
+  {
+    const c0 = K.primitive('box', { l: 50, b: 50, h: 50 }), sideTop = edgeChains(c0).find(ch => !ch.closed && ch.pts.every(p => p[0] > 24.9 && p[2] > 49.9));
+    const c1 = K.blend(c0, [Object.assign(buildEdgeTool(c0, sideTop, 'fillet', 2), { tag: 1 })]);
+    const front = edgeChains(c1).find(ch => !ch.closed && ch.pts.every(p => p[1] < -24.9 && p[2] > 49.9));
+    let ok = false, msg = '';
+    try {
+      const chains = joinChains(c1, tangentChains(c1, [front]));
+      const c2 = K.blend(c1, chains.map(ch => Object.assign(buildEdgeTool(c1, ch, 'fillet', 2), { tag: 2 })));
+      const dv = K.props(c1).volume - K.props(c2).volume;
+      ok = chains.length === 1 && dv > 80 && dv < 110; msg = `${chains[0].segs.length} Segmente, ΔV ${dv.toFixed(1)}`;
+    } catch (e) { msg = e.message; }
+    log(ok, 'Rundung R2 um vorhandene R2-Ecke herum: ' + msg);
+  }
 
   // Auto-Modus ohne zugehörigen Körper (Skizze auf Grundebene): in Material hinein = Loch, vom Körper
   // weg aber berührend = anfügen, frei im Raum = neuer Körper

@@ -510,6 +510,8 @@ function pick(e, dbl) {
       clearSel();
       if (i < 0) bodies.push(hit.bodyId); else if (!sameFace && !dbl) bodies.splice(i, 1);
       sel.bodies = bodies;
+      // Körper per Doppeltipp (oder zweitem Tipp auf die gewählte Fläche) gewählt: gleich bewegen
+      if (sameFace || dbl) { selectionChanged(); return startTransform(); }
     } else {
       clearSel();
       sel.face = faceSel(hit.bodyId, hit.faceIdx);

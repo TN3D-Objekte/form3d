@@ -192,7 +192,7 @@ export function showHelp(device = 'tablet', onDevice) {
       <div><h3>Körper bearbeiten</h3><ul>
         <li><b>Kante antippen</b> – verrunden oder fasen, Maß unten eingeben</li>
         <li><b>Rundung oder Fase antippen</b> – Löschen macht die Kante wieder scharf</li>
-        <li><b>Fläche zweimal antippen</b> – ganzen Körper wählen, weitere Körper dazutippen</li>
+        <li><b>Fläche zweimal antippen</b> – ganzen Körper wählen und gleich verschieben/drehen, weitere Körper dazutippen</li>
         <li>Unten erscheinen Bewegen, Vereinigen, Abziehen, Farbe, Löschen</li>
         <li>Export als STL/OBJ über das Menü oben links</li></ul></div>
       <div><h3>Fehler melden</h3><ul>
