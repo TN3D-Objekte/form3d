@@ -7,6 +7,7 @@ import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains } fro
 import { analyze, faceLoops, smoothSurface } from '../js/meshview.js';
 import { solveSketch } from '../js/solver.js';
 import { checkPrint, bestOrientation } from '../js/printcheck.js';
+import * as Parts from '../js/parts.js';
 const { doc, vp, st, sel, railPick, applyOp } = window.form3d;
 const out = document.createElement('pre');
 out.id = 'selftest';
@@ -368,6 +369,32 @@ try {
     const vCut = K.props(mk('cut').build()).volume, vNew = K.props(mk('new').build()).volume;
     log(Math.abs(vHole - 10.6 * 10.6 * 5) < 0.01 && Math.abs(vPin - 9.4 * 9.4 * 5) < 0.01 && vCut > 112 * 5 && Math.abs(vNew - vPin) < 0.01,
       `Passung Spiel: Loch ${(vHole / 5).toFixed(2)} mm² (Soll 112,36), Zapfen ${(vPin / 5).toFixed(2)} mm² (Soll 88,36), Abzug größer / Neu kleiner`);
+  }
+  // Druckteile: Geometrie gültig und plausibel; per Tipp auf die Deckfläche eines Würfels platziert
+  {
+    const vol = m => (m ? K.props(m).volume : NaN), PI = Math.PI;
+    const csk = vol(Parts.screwHole('M3', 'csk', 10)), thr = vol(Parts.thread('M6', 0, 10, false)), nut = vol(Parts.nutTrap('M3', 10));
+    const geomOk = csk > PI * 1.7 ** 2 * 10 && csk < PI * 3.45 ** 2 * 10 && thr > PI * 2.2 ** 2 * 10 && thr < PI * 2.85 ** 2 * 10 && nut > PI * 1.7 ** 2 * 10;
+    const id = 9002, cube = K.primitive('box', { l: 30, b: 30, h: 20 });
+    const res = {};
+    for (const [tool, variant] of [['screw', 'csk'], ['nut', null], ['thread', 'inner'], ['thread', 'bolt']]) {
+      doc.bodies = doc.bodies.filter(b => b.id !== id);
+      doc.bodies.push({ id, name: 'Teilwürfel', color: '#a9b4c4', visible: true, mesh: cube });
+      Object.assign(vp.view, { theta: -PI / 2, phi: 0.001, dist: 120 }); vp.view.target.set(0, 0, 20); vp.render();
+      railPick(tool);
+      if (variant) st.op.variant = variant;
+      await wait(450);
+      tap(...scr(0, 0, 20));
+      const placed = st.op?.place?.p.map(x => +x.toFixed(2)).join();
+      applyOp();
+      const b = doc.bodies.find(x => x.id === id);
+      res[tool + (variant ? '/' + variant : '')] = [placed, +(K.props(b.mesh).volume - 18000).toFixed(1), b.mesh === cube];
+    }
+    railPick('select');
+    doc.bodies = doc.bodies.filter(b => b.id !== id); window.form3d.sync();
+    const r = Object.values(res), on = r.every(x => x[0] === '0,0,20' && !x[2]);
+    log(geomOk && on && res['screw/csk'][1] < -90 && res.nut[1] < -90 && res['thread/inner'][1] < -150 && res['thread/bolt'][1] > 150,
+      `Druckteile: Senkloch M3 ${csk.toFixed(0)} mm³, Gewinde M6 ${thr.toFixed(0)} mm³, Mutternfalle ${nut.toFixed(0)} mm³; auf Würfel ${JSON.stringify(res)}`);
   }
   // 3MF: ZIP-Verzeichnis lesen, Prüfsumme und Modell (Punkte/Dreiecke je Körper) wie ein Slicer prüfen
   {

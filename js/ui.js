@@ -28,6 +28,9 @@ const ICONS = {
   layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><rect x="9" y="9" width="6" height="6"/>',
   pencil: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
+  screw: '<path d="M6 5h12l-4 5h-4z"/><path d="M10 10v10h4V10M10 13h4M10 16h4"/>',
+  nut: '<path d="M7.5 4.2h9L21 12l-4.5 7.8h-9L3 12z"/><circle cx="12" cy="12" r="3.2"/>',
+  thread: '<path d="M8 3v18M16 3v18"/><path d="M8 6l8 2M8 10l8 2M8 14l8 2M8 18l8 2"/>',
   print: '<path d="M7 9V4h10v5"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v6H7z"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.500 9.500a2.500 2.500 0 113.500 2.300c-.7.4-1 .9-1 1.700M12 17v.01"/>',
 };
@@ -199,6 +202,7 @@ export function showHelp(device = 'tablet', onDevice) {
         <li><b>Druckprüfung</b> (Drucker oben rechts): rot Überhänge über 45°, orange Wände unter 0,8 mm, violett Spalte/Löcher unter 1 mm; <b>Beste Lage</b> legt den Körper mit wenig Überhang auf</li>
         <li>Körper wählen → <b>Druckkanten</b>: unten Fase (kein Elefantenfuß, kein Überhang), oben Rundung – beide Maße einstellbar</li>
         <li>Beim Extrudieren <b>Passung</b> wählen: Press 0,05 · Steck 0,15 · Spiel 0,3 mm je Seite – Löcher werden größer, Zapfen kleiner</li>
+        <li><b>Druckteile</b> links: Schraubenloch (Senkkopf, Zylinderkopf), Mutternfalle, Gewinde (innen oder Bolzen) M2–M12 – Körperfläche antippen, Größe und Tiefe unten wählen</li>
         <li>Menü → <b>An Slicer senden (3MF)</b> öffnet das Teilen-Menü (z. B. Bambu Handy, Prusa); Export auch als 3MF, STL, OBJ</li></ul></div>
       <div><h3>Fehler melden</h3><ul>
         <li>Menü → <b>Fehler aufzeichnen</b>, Fehler nachstellen, <b>Hier!</b> im richtigen Moment, dann <b>Fertig</b></li>

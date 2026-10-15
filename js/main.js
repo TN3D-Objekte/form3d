@@ -11,6 +11,7 @@ import * as UI from './ui.js';
 import { exportSTL, exportOBJ, export3MF, download, share } from './exporters.js';
 import * as Bug from './bugrec.js';
 import { checkPrint, bestOrientation, OVER, THIN, GAP, LIMITS } from './printcheck.js';
+import * as Parts from './parts.js';
 
 const $ = id => document.getElementById(id);
 const V3 = a => new THREE.Vector3(a[0], a[1], a[2]);
@@ -226,7 +227,7 @@ function sync() {
   renderBar();
   renderPanel();
   renderTop();
-  UI.setRailActive($('rail'), st.xf ? 'move' : st.op?.type === 'revolve' ? 'revolve' : st.op?.type === 'prim' || st.op?.type === 'edge' ? st.op.kind : st.pickPlane ? st.pendingTool : st.tool);
+  UI.setRailActive($('rail'), st.xf ? 'move' : st.op?.type === 'revolve' ? 'revolve' : st.op?.type === 'prim' || st.op?.type === 'edge' || st.op?.type === 'part' ? st.op.kind : st.pickPlane ? st.pendingTool : st.tool);
   vp.requestRender();
 }
 onChange(sync);
@@ -362,6 +363,44 @@ function makePrim(kind) {
   };
 }
 
+// Druckteile: Schraubenloch, Mutternfalle, Gewinde – Körperfläche antippen, dort senkrecht zur Fläche
+const PARTS = {
+  screw: { title: 'Schraubenloch', variants: [['csk', 'Senkkopf'], ['cap', 'Zylinderkopf'], ['none', 'Ohne Kopf']], variant: 'csk', depth: 10, m: 'M3' },
+  nut: { title: 'Mutternfalle', variants: null, depth: 10, m: 'M3' },
+  thread: { title: 'Gewinde', variants: [['inner', 'Innengewinde'], ['bolt', 'Bolzen']], variant: 'inner', depth: 10, m: 'M6' },
+};
+function makePart(kind) {
+  return {
+    type: 'part', kind, ...PARTS[kind], place: null, parentId: null,
+    get mode() { return this.kind === 'thread' && this.variant === 'bolt' ? 'add' : 'cut'; },
+    build() {
+      if (!this.place) return null;
+      const { p, n } = this.place, out = this.mode === 'add';
+      let local;
+      if (this.kind === 'screw') local = Parts.screwHole(this.m, this.variant, this.depth);
+      else if (this.kind === 'nut') local = Parts.nutTrap(this.m, this.depth);
+      else local = out ? Parts.thread(this.m, -0.3, this.depth, false) : Parts.thread(this.m, -0.05, this.depth, true);
+      // lokales System: z in das Material (Bolzen: aus der Fläche heraus)
+      const z = new THREE.Vector3(...n).multiplyScalar(out ? 1 : -1).normalize();
+      const x = new THREE.Vector3(1, 0, 0).cross(z).lengthSq() > 1e-6 ? new THREE.Vector3().crossVectors(z, new THREE.Vector3(1, 0, 0)).normalize() : new THREE.Vector3(0, 1, 0);
+      const y = new THREE.Vector3().crossVectors(z, x);
+      const m4 = new THREE.Matrix4().makeBasis(x, y, z).setPosition(...p);
+      return K.transform(local, m4.elements);
+    },
+  };
+}
+function placePart(o, e) {
+  const hb = vp.ray(e.x, e.y).intersectObjects(bodyMeshes(), false)[0];
+  if (!hb) return UI.toast('Eine Körperfläche antippen');
+  const id = hb.object.userData.bodyId, fn = views.get(id).an.fn, i = hb.faceIndex;
+  const n = [fn[3 * i], fn[3 * i + 1], fn[3 * i + 2]], p = hb.point.toArray();
+  // auf achsparallelen Flächen auf 0,5 mm runden
+  if (n.some(c => Math.abs(Math.abs(c) - 1) < 1e-6)) for (let k = 0; k < 3; k++) if (Math.abs(n[k]) < 1e-6) p[k] = Math.round(p[k] * 2) / 2;
+  o.place = { p, n };
+  o.parentId = id;
+  refreshOp();
+}
+
 function opFromSelection() {
   if (sel.regions.length) {
     const s = sketch(sel.regions[0].sketchId), all = sketchRt(s).regions;
@@ -408,7 +447,7 @@ function applyOp() {
   let tool = null;
   try { tool = o.build(); } catch (e) { console.error(e); }
   if (!tool) {
-    return UI.toast(o.type === 'revolve' && !o.axis ? 'Zuerst eine Achse wählen' : o.type === 'extrude' ? 'Am Pfeil ziehen oder Abstand eingeben' : 'Operation ergibt keinen Körper');
+    return UI.toast(o.type === 'part' ? 'Zuerst eine Körperfläche antippen' : o.type === 'revolve' && !o.axis ? 'Zuerst eine Achse wählen' : o.type === 'extrude' ? 'Am Pfeil ziehen oder Abstand eingeben' : 'Operation ergibt keinen Körper');
   }
   try {
     applySolid(tool, resolveMode(o), o.parentId, o.mode === 'auto' && o.parentId != null);
@@ -516,6 +555,7 @@ function pick(e, dbl) {
     return;
   }
   if (o?.type === 'prim') return;
+  if (o?.type === 'part') return placePart(o, e);
   const badge = badgeAt(e);
   if (badge) { clearSel(); sel.con = badge; return selectionChanged(); }
   const ent = pickEntity(e), edge = ent || dbl ? null : pickEdge(e), hit = ent || edge ? null : pickSurface(e);
@@ -1053,6 +1093,12 @@ function renderBar() {
       B('Y-Achse', null, () => { o.axis = { p: [0, 0], d: [0, 1] }; refreshOp(); });
       F('Winkel', o.angle, '°', v => { o.angle = Math.max(1, Math.min(360, Math.abs(v))); refreshOp(); });
     }
+    if (o.type === 'part') {
+      if (!o.place) L('Körperfläche antippen', true);
+      items.push({ type: 'seg', value: o.m, options: Parts.SIZES.map(m => [m, m]), onChange: m => { o.m = m; refreshOp(); } });
+      if (o.variants) items.push({ type: 'seg', value: o.variant, options: o.variants, onChange: v => { o.variant = v; refreshOp(); } });
+      F(o.kind === 'thread' ? 'Länge' : 'Tiefe', o.depth, 'mm', v => { if (v > 0) { o.depth = v; refreshOp(); } });
+    }
     if (o.type === 'prim') {
       const names = { l: 'Länge', b: 'Breite', h: 'Höhe', d: 'Durchmesser' };
       for (const k of Object.keys(o.vals)) F(names[k], o.vals[k], 'mm', v => { if (v > 0) { o.vals[k] = v; refreshOp(); } });
@@ -1243,6 +1289,7 @@ const RAIL = [
   { title: 'Skizze', tools: [{ id: 'line', label: 'Linie', icon: 'line' }, { id: 'rect', label: 'Rechteck', icon: 'rect' }, { id: 'circle', label: 'Kreis', icon: 'circle' }, { id: 'arc', label: 'Bogen', icon: 'arc' }] },
   { title: 'Formen', tools: [{ id: 'extrude', label: 'Extrusion', icon: 'extrude' }, { id: 'revolve', label: 'Rotation', icon: 'revolve' }, { id: 'fillet', label: 'Rundung', icon: 'fillet' }, { id: 'chamfer', label: 'Fase', icon: 'chamfer' }, { id: 'move', label: 'Bewegen', icon: 'move' }] },
   { title: 'Körper', tools: [{ id: 'box', label: 'Quader', icon: 'box' }, { id: 'cyl', label: 'Zylinder', icon: 'cyl' }, { id: 'sphere', label: 'Kugel', icon: 'sphere' }] },
+  { title: 'Druckteile', tools: [{ id: 'screw', label: 'Schraube', icon: 'screw' }, { id: 'nut', label: 'Mutter', icon: 'nut' }, { id: 'thread', label: 'Gewinde', icon: 'thread' }] },
 ];
 
 function railPick(id) {
@@ -1259,9 +1306,10 @@ function railPick(id) {
   }
   if (id !== 'select') endSketch();
   clearSel();
-  st.op = id === 'select' ? null : makePrim(id);
+  st.op = id === 'select' ? null : PARTS[id] ? makePart(id) : makePrim(id);
   sync();
   refreshOp();
+  if (PARTS[id]) UI.toast('Körperfläche antippen, wo ' + (id === 'nut' ? 'die Mutternfalle' : id === 'thread' ? 'das Gewinde' : 'das Schraubenloch') + ' hin soll');
 }
 
 // Druckprüfung ein/aus und Ergebnis für die gewählten (sonst alle sichtbaren) Körper

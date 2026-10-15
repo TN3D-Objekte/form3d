@@ -65,6 +65,21 @@ export function extrude(regions, plane, d, over = 0, offset = 0) {
   return toMesh(m.transform(planeMatrix(plane)));
 }
 
+// Drehkörper um die z-Achse aus einem Profil [[r, z], …] (r ≥ 0, gegen den Uhrzeigersinn)
+export const lathe = profile => toMesh(Manifold.revolve(new CrossSection([profile], 'EvenOdd'), 64));
+// Prisma aus einem Polygon in der xy-Ebene von z0 bis z1
+export const extrudeZ = (poly, z0, z1) => toMesh(Manifold.extrude(new CrossSection([poly], 'EvenOdd'), z1 - z0).translate([0, 0, z0]));
+// geschlossenes Dreiecksnetz als Körper übernehmen (prüft es dabei), nach außen orientiert
+export function solid(v, t) {
+  let vol = 0;
+  for (let i = 0; i < t.length; i += 3) {
+    const a = t[i] * 3, b = t[i + 1] * 3, c = t[i + 2] * 3;
+    vol += v[a] * (v[b + 1] * v[c + 2] - v[b + 2] * v[c + 1]) + v[a + 1] * (v[b + 2] * v[c] - v[b] * v[c + 2]) + v[a + 2] * (v[b] * v[c + 1] - v[b + 1] * v[c]);
+  }
+  if (vol < 0) for (let i = 0; i < t.length; i += 3) { const x = t[i + 1]; t[i + 1] = t[i + 2]; t[i + 2] = x; }
+  return toMesh(toManifold({ v, t }));
+}
+
 // axis: { p: [x, y], d: [dx, dy] } in Skizzenkoordinaten
 export function revolve(regions, plane, axis, degrees) {
   const len = Math.hypot(axis.d[0], axis.d[1]);
