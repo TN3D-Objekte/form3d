@@ -476,7 +476,25 @@ try {
     log(soft && cut > 1e-3 && sdel.every(d => d < 1e-3) && creaseChains(soft.mesh, t => t === 3).every(c => c.tags.includes(3) || c.segs.length < 20),
       `Übergang zwischen den Rundungen: ${ts.length} Werkzeug, abgetragen ${cut.toFixed(4)} mm³, nach Löschen oben/unten/Übergang Abweichung ${sdel.map(d => d.toFixed(4)).join(', ')}`);
     log(devs.every(d => d < 1e-3) && extra.every(e => e === 0), `Zwei sich berührende Rundungen: Abweichungen ${devs.map(d => d.toFixed(4)).join(', ')} mm³ (Reihenfolge, Löschen), zusätzliche Kanten ${extra}`);
+  }  // Rundung an der Plattenkante läuft in die Senkung (große Rundung) eines Lochs nahe der Kante: Der Übergang
+  // darf an seinen Enden keine flache Tasche ins Material schneiden (Falte aus nach unten zeigenden Flächen)
+  {
+    let m = K.primitive('box', { l: 60, b: 40, h: 8 });
+    const bb = { lo: [0, 1, 2].map(k => Math.min(...m.v.filter((_, i) => i % 3 === k))), hi: [0, 1, 2].map(k => Math.max(...m.v.filter((_, i) => i % 3 === k))) };
+    const zt = bb.hi[2], cx = (bb.lo[0] + bb.hi[0]) / 2, cy = bb.lo[1] + 9;
+    m = K.boolean('subtract', m, K.transform(K.primitive('cyl', { d: 6, h: 40 }), [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, cx, cy, bb.lo[2] - 10, 1]));
+    const avg = (c, k) => c.pts.reduce((s, x) => s + x[k], 0) / c.pts.length;
+    const sink = edgeChains(m).find(c => c.closed && c.pts.every(p => Math.abs(p[2] - zt) < 1e-3));
+    const a1 = K.blendFeatures(m, [Object.assign(buildEdgeTool(m, sink, 'fillet', 4), { tag: 1, kind: 'fillet', size: 4 })]);
+    const rim = edgeChains(a1.mesh).find(c => !c.closed && c.pts.every(p => Math.abs(p[2] - zt) < 1e-3 && Math.abs(p[1] - bb.lo[1]) < 1e-3));
+    const a2 = K.blendFeatures(a1.mesh, [Object.assign(buildEdgeTool(a1.mesh, rim, 'fillet', 3), { tag: 2, kind: 'fillet', size: 3 })]);
+    const feats = [...a1.features, ...a2.features], ts = transitionTools(a2.mesh, feats, [2], 3), tr = ts.length ? K.blendFeatures(a2.mesh, ts) : null;
+    const an = tr && analyze(tr.mesh);
+    let pocket = 0;
+    if (an) for (let ti = 0; ti < tr.mesh.t.length / 3; ti++) if (an.fn[3 * ti + 2] < -0.5 && tr.mesh.v[3 * tr.mesh.t[3 * ti] + 2] > zt - 2) pocket += an.fa[ti];
+    log(tr && pocket < 1e-4, `Plattenkante läuft in Senkung: ${ts.length} Übergang, nach unten zeigende Fläche oben ${pocket.toExponential(1)} mm² (Falte am Ende des Übergangs)`);
   }
+
   // Kombinieren über die Leiste: Ziel, dann Werkzeug antippen; Abziehen, Tauschen + Schnitt, Vereinigen mit
   // verrundeten Körpern (Kennungen bleiben eindeutig, Rundung lässt sich danach noch auswählen)
   {

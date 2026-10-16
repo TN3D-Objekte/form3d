@@ -681,17 +681,26 @@ function creaseMesh(mesh, chain, R, grow) {
     const { p, C, N1, N2 } = prof[i], { eA, eB, nA, nB } = ends[k];
     const A = add(C, eA, R), B = add(C, eB, R), phi = angle(eA, eB), sp = Math.sin(phi) || 1;
     const Q = add(p, add(N1, N2), sgn * EPS / Math.max(0.2, 1 + dot(N1, N2)));
-    const ring = [A, add(A, nA, sgn * EPS), Q, add(B, nB, sgn * EPS), B];
+    let ring = [A, add(A, nA, sgn * EPS), Q, add(B, nB, sgn * EPS), B], a = A, b = B, c = C;
     for (let j = 1; j < nArc; j++) {
       const s = j / nArc, wa = phi > 1e-6 ? Math.sin(s * phi) / sp : s, wb = phi > 1e-6 ? Math.sin((1 - s) * phi) / sp : 1 - s;
       ring.push(add(C, add(eA.map(x => x * wa), eB, wb), R));
     }
-    if (grow) {
-      for (const j of [0, ...ring.keys()].filter(j => j === 0 || j >= 4)) ring[j] = add(ring[j], norm(sub(C, ring[j])), grow);
-      for (const [j, e] of [[0, A], [1, A], [3, B], [4, B]]) ring[j] = add(ring[j], norm(sub(e, p)), grow);
-    }
     const f = taper(k);
-    return f < 1 ? ring.map(q => add(p, sub(q, p), f)) : ring;
+    if (f < 1) {
+      // Querschnitt zum Kantenpunkt hin zusammenziehen. Die Randpunkte lägen dann auf Sehnen unter den
+      // gekrümmten Flächen, und die Hilfspunkte darüber schnitten eine flache Tasche ins Material (eine Falte
+      // am Ende des Übergangs). Daher die Randpunkte auf die Flächen legen und die Hilfspunkte darüber.
+      ring = ring.map(q => add(p, sub(q, p), f));
+      const fa = foot(ring[0], sides[0]), fb = foot(ring[4], sides[1]);
+      if (fa && fb) ring.splice(0, 5, fa.q, add(fa.q, fa.n, sgn * EPS), Q, add(fb.q, fb.n, sgn * EPS), fb.q);
+      a = ring[0]; b = ring[4]; c = add(p, sub(C, p), f);
+    }
+    if (grow) {
+      for (const j of [0, ...ring.keys()].filter(j => j === 0 || j >= 4)) ring[j] = add(ring[j], norm(sub(c, ring[j])), grow);
+      for (const [j, e] of [[0, a], [1, a], [3, b], [4, b]]) ring[j] = add(ring[j], norm(sub(e, p)), grow);
+    }
+    return ring;
   });
   return { convex, mesh: tube(rings, closedRun), trim: [] };
 }
