@@ -192,6 +192,14 @@ function unblendCore(mesh, features, keep) {
 }
 export const unblend = (mesh, features, keep) => unblendFeatures(mesh, features, keep).mesh;
 
+// Geschlecht (Anzahl Durchgangslöcher) und Zahl der Teilkörper – für den Fuzz-Test
+export function topology(mesh) {
+  const m = toManifold(mesh), parts = m.decompose();
+  return { genus: m.genus(), parts: parts.length };
+}
+// Volumen von a ohne b (0, wenn nichts übrig bleibt)
+export const volumeMinus = (a, b) => { const r = toManifold(a).subtract(toManifold(b)); return r.isEmpty() ? 0 : r.volume(); };
+
 export const intersects = (a, b) => !toManifold(a).intersect(toManifold(b)).isEmpty();
 
 export const transform = (mesh, m16) => toMesh(toManifold(mesh).transform(Array.from(m16)));

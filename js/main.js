@@ -5,7 +5,8 @@ import { ViewCube } from './viewcube.js';
 import * as K from './kernel.js';
 import * as S from './sketch.js';
 import { analyze, faceTriangles, faceCentroid, faceLoops, smoothSurface, hideSeams } from './meshview.js';
-import { edgeChains, buildEdgeTool, cornerTools, joinChains, tangentChains, restoredChains, isConvex, transitionTools } from './edges.js';
+import { edgeChains, restoredChains, isConvex } from './edges.js';
+import { edgeTools, withTransitions } from './blendop.js';
 import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
@@ -1294,38 +1295,6 @@ function renderBar() {
     B('Skizze beenden', 'check', () => { endSketch(); sync(); }, 'primary');
   }
   UI.renderBar($('bar'), items);
-}
-
-// Schneidet eine neue Rundung eine vorhandene, wird die Schnittkante weich ausgerundet (Übergang, siehe edges.js).
-// Gelingt das nicht, bleibt die Kante – die Rundung selbst ist ja angelegt.
-function withTransitions(old, r) {
-  const all = [...old, ...r.features];
-  try {
-    const ts = transitionTools(r.mesh, all, r.features.map(f => f.tag), nextTag({ mesh: r.mesh, features: all }));
-    if (!ts.length) return r;
-    const t = K.blendFeatures(r.mesh, ts);
-    return t.mesh ? { mesh: t.mesh, features: [...r.features, ...t.features] } : r;
-  } catch (e) { console.warn('Übergang nicht möglich', e); return r; }
-}
-
-// Neue Kennungen für Rundungs-/Fasenflächen eines Körpers (12 Bit, siehe kernel.js)
-function nextTag(b) {
-  const used = Math.max(K.maxTag(b.mesh), ...(b.features || []).map(f => f.tag));
-  return used + 64 < 4096 ? used + 1 : 1;
-}
-
-// Werkzeuge für Rundung/Fase: tangential anschließende Kanten laufen mit, außer der Radius ist dafür
-// zu groß (dann nur die angetippten Kanten)
-function edgeTools(b, picked, kind, size) {
-  const make = list => {
-    const chains = joinChains(b.mesh, list), base = nextTag(b);
-    const ts = [...chains.map(ch => buildEdgeTool(b.mesh, ch, kind, size, chains)), ...cornerTools(b.mesh, chains, kind, size)];
-    ts.forEach((t, i) => Object.assign(t, { tag: base + i, kind, size, links: t.chains?.map(ci => base + ci) }));
-    return ts;
-  };
-  const ext = tangentChains(b.mesh, picked);
-  if (ext.length > picked.length) try { return make(ext); } catch (e) { if (!/Radius zu groß/.test(e.message)) throw e; }
-  return make(picked);
 }
 
 // Druckkanten: unten (auf der Druckplatte) Fase gegen den Elefantenfuß – sie erzeugt keinen Überhang –,

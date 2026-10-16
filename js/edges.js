@@ -251,6 +251,27 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
         }
         return len(c);
       }
+      // Endet hier eine im selben Schritt verrundete Außenkante mit gemeinsamer Fläche (z. B. zwei Unterkanten eines Lochs
+      // an seiner Ecke), treffen sich beide Werkzeuge auf Gehrung: verlängern und an der Winkelhalbierenden der beiden
+      // anderen Flächen abschneiden. Endete jedes im Querschnitt an der Ecke, bliebe dazwischen ein Keil stehen.
+      for (const o of convex ? chains : []) {
+        if (o === chain || o.closed || !isConvex(mesh, o)) continue;
+        const g = o.segs[0].u === vi ? o.segs[0] : o.segs[o.segs.length - 1].v === vi ? o.segs[o.segs.length - 1] : null;
+        if (!g) continue;
+        const mine = [nrm(s.t1), nrm(s.t2)], theirs = [nrm(g.t1), nrm(g.t2)];
+        const k = mine.findIndex(n => theirs.some(m => dot(m, n) > 0.999));
+        if (k < 0) continue;
+        const nk = mine[1 - k], no = theirs.find(m => dot(m, mine[k]) <= 0.999);
+        if (dot(nk, no) > 0.999) continue;
+        let m = norm(sub(nk, no));
+        if (dot(m, out) > 0) m = m.map(x => -x); // die Kante liegt auf der behaltenen Seite
+        const along = dot(m, out);
+        if (along > -0.05) continue;
+        const o2 = dot(m, p) - 1e-3; // knapp darüber hinaus: die Werkzeuge überlappen, ohne dass ein Deckel aus der Rundung ragt
+        if (chain.pts.some(q => dot(m, q) < o2 - 1e-6)) continue;
+        trim.push({ n: m, o: o2 });
+        return Math.max(...ring.map(q => (dot(m, q) - o2 + 0.05) / -along), GAP);
+      }
       // genau eine Endfläche: Seite der Kante behalten
       const ne = ends[0], ce = ends.length === 1 ? dot(ne, out) : 0;
       if (Math.abs(ce) < 0.1) return -GAP;

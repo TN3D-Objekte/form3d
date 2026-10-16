@@ -8,6 +8,8 @@ import { analyze, faceLoops, smoothSurface } from '../js/meshview.js';
 import { solveSketch } from '../js/solver.js';
 import { checkPrint, bestOrientation } from '../js/printcheck.js';
 import * as Parts from '../js/parts.js';
+import { applyEdges } from '../js/blendop.js';
+import { check as fuzzCheck } from './fuzzlib.js';
 const { doc, vp, st, sel, railPick, applyOp } = window.form3d;
 const out = document.createElement('pre');
 out.id = 'selftest';
@@ -263,6 +265,18 @@ try {
     let tip = Infinity;
     for (let i = 0; i < r.v.length; i += 3) tip = Math.min(tip, Math.hypot(r.v[i] - 30, r.v[i + 1] + 25, r.v[i + 2] - 55));
     log(e.length === 1 && tip > 0.5, `Rundung an stumpfer Ecke ohne Nachbarrundung: Ecke ${tip.toFixed(2)} mm abgetragen (Soll > 0,5)`);
+  }
+  // Unterkanten eines viereckigen Durchgangslochs (spitze und stumpfe Ecken) gerundet bzw. gefast: Die Werkzeuge
+  // treffen sich an jeder Ecke auf Gehrung, es bleiben keine Keile/Lappen stehen (Fehleraufzeichnung 2026-10-16)
+  {
+    const quad = [[30, 20], [0, -5], [-4.69, 4.69], [10, 25]];
+    const blk = K.boolean('subtract', K.extrude([{ outer: [[-40, -30], [50, -30], [50, 40], [-40, 40]], holes: [] }], S.BASE_PLANES.xy, 20), K.extrude([{ outer: quad, holes: [] }], S.BASE_PLANES.xy, 20, 1e-3));
+    const all = edgeChains(blk), idx = all.map((c, i) => i).filter(i => all[i].pts.every(p => Math.abs(p[2]) < 1e-3 && Math.abs(p[0]) < 35 && Math.abs(p[1]) < 28));
+    const res = ['fillet', 'chamfer'].map(kind => {
+      const r = applyEdges({ mesh: blk, features: [] }, idx.map(i => all[i]), kind, 2);
+      return kind + ' ' + (Object.keys(fuzzCheck(blk, r.mesh, idx, kind, 2, false).codes).join(',') || 'ok');
+    });
+    log(idx.length === 4 && res.every(x => x.endsWith('ok')), `Lochunterkanten auf Gehrung: ${idx.length} Kanten, ${res.join(' · ')}`);
   }
   // Nach Verrundung der Oberkante wählt Antippen der senkrechten Kante nur diese (nicht den Bogen dahinter)
   const tf = K.blend(bx, edgeChains(bx).filter(ch => !vertical(ch) && ch.pts.every(p => p[2] > 29.9 && p[1] < -24.9)).map(ch => buildEdgeTool(bx, ch, 'fillet', 2)));
