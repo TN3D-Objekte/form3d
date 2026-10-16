@@ -1471,7 +1471,7 @@ function renderTop() {
 }
 
 function buildTop() {
-  const B = (id, ic, label, onClick, text) => UI.h('button', { id, class: 'top-btn' + (text ? ' text' : ''), title: label, 'aria-label': label, onclick: onClick, html: text ? `<span>${text}</span>` : UI.icon(ic) });
+  const B = (id, ic, label, onClick) => UI.h('button', { id, class: 'top-btn', title: label, 'aria-label': label, onclick: onClick, html: UI.icon(ic) });
   $('topbar').append(
     UI.h('div', { id: 'top-file', class: 'top-group' },
       B('btn-menu', 'menu', 'Menü', openMenu),
@@ -1480,10 +1480,6 @@ function buildTop() {
       B('btn-undo', 'undo', 'Rückgängig', doUndo),
       B('btn-redo', 'redo', 'Wiederholen', doRedo)),
     UI.h('div', { id: 'top-view', class: 'top-group' },
-      B('', '', 'Isometrisch', () => vp.setView('iso'), 'Iso'),
-      B('', '', 'Von oben', () => vp.setView('top'), 'Oben'),
-      B('', '', 'Von vorne', () => vp.setView('front'), 'Vorne'),
-      B('', '', 'Von rechts', () => vp.setView('right'), 'Rechts'),
       B('', 'fit', 'Alles einpassen', () => vp.fit(sceneBox())),
       B('btn-check', 'print', 'Druckprüfung', toggleCheck),
       B('btn-panel', 'layers', 'Elemente', () => { $('panel').classList.toggle('closed'); })));

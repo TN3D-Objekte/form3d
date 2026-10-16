@@ -4,7 +4,7 @@
 import { h } from './ui.js';
 
 const ITEMS = [
-  ['top-file', 'Menü'], ['top-hist', 'Rückgängig'], ['top-view', 'Ansichten'],
+  ['top-file', 'Menü'], ['top-hist', 'Rückgängig'], ['top-view', 'Ansicht'],
   ['rail', 'Werkzeuge'], ['panel', 'Elemente'], ['bar', 'Werkzeugoptionen'], ['numpad', 'Ziffernblock'],
   ['toast', 'Meldungen'], ['check', 'Druckprüfung'], ['gridchip', 'Raster'], ['viewcube', 'Ansichtswürfel'],
 ];

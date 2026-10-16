@@ -208,7 +208,6 @@ button:disabled { opacity: 0.32; cursor: default; }
 #loading { position: fixed; inset: 0; z-index: 9; display: grid; place-items: center; background: var(--bg); font-weight: 600; color: var(--muted); padding: 24px; text-align: center; }
 
 @media (max-width: 760px) {
-  .top-btn.text { display: none; }
   #panel { width: 190px; }
   #bar { max-width: calc(100% - 20px); }
   #gridchip { bottom: calc(var(--bottom) + 66px); }
