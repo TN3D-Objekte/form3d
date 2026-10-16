@@ -6,7 +6,7 @@ import * as K from './kernel.js';
 import * as S from './sketch.js';
 import { analyze, faceTriangles, faceCentroid, faceLoops, smoothSurface, hideSeams } from './meshview.js';
 import { edgeChains, restoredChains, isConvex } from './edges.js';
-import { edgeTools, withTransitions } from './blendop.js';
+import { edgeTools, edgeResult, withTransitions } from './blendop.js';
 import { solveSketch, CON } from './solver.js';
 import { doc, commit, undo, redo, canUndo, canRedo, newId, resetHistory, loadLocal, toFile, fromFile, onChange } from './doc.js';
 import * as UI from './ui.js';
@@ -1343,7 +1343,7 @@ function startEdgeOp(kind, opts = {}) {
     type: 'edge', title: opts.restore ? 'Bearbeiten' : 'Kanten', kind, size: opts.size || 2, bodyId: b.id, convex: true, restore: opts.restore,
     tools() { return edgeTools(b, picked, this.kind, this.size); },
     build() { const ts = this.tools(); this.convex = ts.some(t => t.convex); return K.unionAll(ts.map(K.toolMesh)); },
-    result() { return K.blendFeatures(b.mesh, this.tools()); },
+    result() { return edgeResult(b, picked, this.kind, this.size); },
   };
   stopTransform();
   st.op = o;

@@ -1,7 +1,8 @@
 // Ablauf von Rundung/Fase an einem Körper { mesh, features }: Werkzeuge bauen, anwenden, Übergänge zu
 // vorhandenen Rundungen ausrunden. Ohne Oberfläche, damit ihn auch der Fuzz-Test (tests/fuzz.html) nutzt.
 import * as K from './kernel.js';
-import { buildEdgeTool, cornerTools, joinChains, tangentChains, transitionTools } from './edges.js';
+import { buildEdgeTool, cornerTools, joinChains, tangentChains, transitionTools, edgeChains, isConvex } from './edges.js';
+import { analyze } from './meshview.js';
 
 // Neue Kennungen für Rundungs-/Fasenflächen eines Körpers (12 Bit, siehe kernel.js)
 export function nextTag(b) {
@@ -9,16 +10,16 @@ export function nextTag(b) {
   return used + 64 < 4096 ? used + 1 : 1;
 }
 
-// Werkzeuge für Rundung/Fase: tangential anschließende Kanten laufen mit, außer der Radius ist dafür
+// Werkzeuge für Rundung/Fase: tangential anschließende Kanten laufen mit (extend), außer der Radius ist dafür
 // zu groß (dann nur die angetippten Kanten)
-export function edgeTools(b, picked, kind, size) {
+export function edgeTools(b, picked, kind, size, extend = true) {
   const make = list => {
     const chains = joinChains(b.mesh, list), base = nextTag(b);
     const ts = [...chains.map(ch => buildEdgeTool(b.mesh, ch, kind, size, chains)), ...cornerTools(b.mesh, chains, kind, size)];
     ts.forEach((t, i) => Object.assign(t, { tag: base + i, kind, size, links: t.chains?.map(ci => base + ci) }));
     return ts;
   };
-  const ext = tangentChains(b.mesh, picked);
+  const ext = extend ? tangentChains(b.mesh, picked) : picked;
   if (ext.length > picked.length) try { return make(ext); } catch (e) { if (!/Radius zu groß/.test(e.message)) throw e; }
   return make(picked);
 }
@@ -35,9 +36,54 @@ export function withTransitions(old, r) {
   } catch (e) { console.warn('Übergang nicht möglich', e); return r; }
 }
 
+// Ergebnis von Rundung/Fase ohne Übergänge: { mesh, features } (nur die neuen Rundungen/Fasen).
+// Treffen gewählte Außen- und Innenkanten in einer Ecke zusammen (z. B. alle Kanten einer Taschenwand: Rand außen,
+// senkrechte Ecken und Boden innen), entstehen erst die Innenrundungen. Ihre Füllung reicht in der Ecke bis an die
+// Oberfläche; dort entsteht eine neue Bogenkante. Die Außenrundung läuft dann über den Rand und diese Bögen – sonst
+// stünde die Füllung als Ohr über dem gerundeten Rand.
+export function edgeResult(b, picked, kind, size) {
+  const conv = picked.filter(c => isConvex(b.mesh, c)), conc = picked.filter(c => !isConvex(b.mesh, c));
+  if (conv.length && conc.length && touching(b.mesh, conv, conc)) {
+    try {
+      const r1 = K.blendFeatures(b.mesh, edgeTools(b, conc, kind, size));
+      if (r1.mesh) {
+        const b1 = { mesh: r1.mesh, features: [...(b.features || []), ...r1.features] }, next = followChains(b.mesh, r1.mesh, conv);
+        if (next.length) {
+          const r2 = K.blendFeatures(b1.mesh, edgeTools(b1, next, kind, size, false)); // nicht um die ganze Tasche weiterlaufen
+          if (r2.mesh) return { mesh: r2.mesh, features: [...r1.features, ...r2.features] };
+        }
+      }
+    } catch (e) { if (/Radius zu groß/.test(e.message)) throw e; console.warn('Rundung in zwei Phasen nicht möglich', e); }
+  }
+  return K.blendFeatures(b.mesh, edgeTools(b, picked, kind, size));
+}
+
+const pt = (mesh, i) => [mesh.v[3 * i], mesh.v[3 * i + 1], mesh.v[3 * i + 2]];
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+function segDist(q, a, b) {
+  const ab = [0, 1, 2].map(k => b[k] - a[k]), l2 = ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2;
+  const u = l2 ? Math.max(0, Math.min(1, ((q[0] - a[0]) * ab[0] + (q[1] - a[1]) * ab[1] + (q[2] - a[2]) * ab[2]) / l2)) : 0;
+  return dist(q, a.map((x, k) => x + ab[k] * u));
+}
+const ends = (mesh, c) => (c.closed ? [] : [pt(mesh, c.segs[0].u), pt(mesh, c.segs[c.segs.length - 1].v)]);
+const touching = (mesh, a, b) => a.some(c => ends(mesh, c).some(p => b.some(d => ends(mesh, d).some(q => dist(p, q) < 1e-4))));
+
+// Außenkanten nach den Innenrundungen wiederfinden: Stücke der gewählten Kanten (liegen auf ihnen) und neue Kanten,
+// die an ein solches Stück anschließen und nicht auf einer alten Kante liegen (Bogen um die Eckfüllung)
+function followChains(M, M1, conv) {
+  const segsOf = (mesh, list) => list.flatMap(c => c.segs.map(g => [pt(mesh, g.u), pt(mesh, g.v)]));
+  const old = segsOf(M, conv), an = analyze(M), sharp = [];
+  for (let s = 0; s < an.sharp.length; s += 2) sharp.push([pt(M, an.sharp[s]), pt(M, an.sharp[s + 1])]);
+  const on = (c, segs) => c.segs.every(g => { const a = pt(M1, g.u), b = pt(M1, g.v), m = a.map((x, k) => (x + b[k]) / 2); return segs.some(([p, q]) => segDist(m, p, q) < 1e-3); });
+  const cand = edgeChains(M1).filter(c => isConvex(M1, c)), rim = cand.filter(c => on(c, old));
+  const tips = rim.flatMap(c => ends(M1, c));
+  const arcs = cand.filter(c => !rim.includes(c) && !on(c, sharp) && ends(M1, c).some(p => tips.some(q => dist(p, q) < 1e-4)));
+  return [...rim, ...arcs];
+}
+
 // Ganzer Schritt wie beim Tippen auf „Fertig“: neues Netz und alle Rundungen/Fasen des Körpers
 export function applyEdges(b, picked, kind, size) {
-  let r = K.blendFeatures(b.mesh, edgeTools(b, picked, kind, size));
+  let r = edgeResult(b, picked, kind, size);
   if (!r.mesh) throw new Error('leeres Ergebnis');
   r = withTransitions(b.features || [], r);
   return { mesh: r.mesh, features: [...(b.features || []), ...r.features] };
