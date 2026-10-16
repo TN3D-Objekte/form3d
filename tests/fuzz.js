@@ -125,11 +125,16 @@ async function runMany(from, n, workers, post) {
     return fetch('/fuzz-result?key=' + post, { method: 'POST', body });
   };
   const fail = (id, code, why) => ({ id, fail: true, steps: [{ codes: { [code]: 1 }, sig: { [code]: why } }] });
+  // Manifold gibt seinen WASM-Speicher im Worker nie zurück: Worker nach RECYCLE Fällen ersetzen, sonst wächst
+  // der Speicher mit jedem Fall, bis das System den Lauf abbricht
+  const RECYCLE = 25;
   const slot = async () => {
-    let w = null;
+    let w = null, used = 0;
     while (queue.length) {
       const id = queue.shift();
-      w ||= new Worker('fuzz-worker.js', { type: 'module' });
+      if (w && used >= RECYCLE) { w.terminate(); w = null; }
+      if (!w) { w = new Worker('fuzz-worker.js', { type: 'module' }); used = 0; }
+      used++;
       const r = await new Promise(res => {
         const timer = setTimeout(() => { w.terminate(); w = null; res(fail(id, 'ZEITLIMIT', '-')); }, LIMIT);
         w.onmessage = e => { clearTimeout(timer); res(e.data); };
