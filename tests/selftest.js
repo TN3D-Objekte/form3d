@@ -567,11 +567,24 @@ try {
   [911, 912, 913].forEach((id, k) => fire('pointerdown', 300 + 40 * k, 300, T2(id)));
   for (let i = 1; i <= 5; i++) [911, 912, 913].forEach((id, k) => fire('pointermove', 300 + 40 * k + 15 * i, 300, T2(id)));
   [911, 912, 913].forEach((id, k) => fire('pointerup', 375 + 40 * k, 300, T2(id)));
-  log(vp.view.target.distanceTo(t0) < 1e-6 && vp.view.theta - th0 < -0.3 && tri.entities.length === nLines + 1, `3 Finger: gedreht ${(vp.view.theta - th0).toFixed(2)}, verschoben ${vp.view.target.distanceTo(t0).toFixed(1)} mm`);
+  log(vp.view.theta - th0 < -0.3 && tri.entities.length === nLines + 1, `3 Finger: gedreht ${(vp.view.theta - th0).toFixed(2)}, Ziel mit dem Drehpunkt mitgeführt ${vp.view.target.distanceTo(t0).toFixed(1)} mm`);
   railPick('select');
   const th1 = vp.view.theta;
   dragTo(200, 500, 320, 520, T);
-  log(vp.view.theta === th1, '1 Finger im Auswahlmodus dreht nicht');
+  log(vp.view.theta !== th1, '1 Finger im Auswahlmodus dreht');
+
+  // Freies Drehen: über den Pol hinweg ohne Anschlag, der angefasste Modellpunkt bleibt stehen
+  {
+    Object.assign(vp.view, { theta: -Math.PI / 2, phi: 0.3, dist: 300 }); vp.view.target.set(0, 0, 0); vp.render();
+    const piv = vp.view.target.clone().set(30, 10, 5), s0 = piv.clone(), s1 = piv.clone();
+    vp.project(piv, s0);
+    vp.orbit(0, 100, piv); vp.render(); // 0,8 rad nach oben: über den Pol
+    vp.project(piv, s1);
+    const over = vp.view.phi < 0, still = Math.hypot(s1.x - s0.x, s1.y - s0.y) < 0.5;
+    vp.orbit(0, -100, piv); vp.render();
+    const back = Math.abs(vp.view.phi - 0.3) < 1e-6;
+    log(over && still && back, `Freies Drehen: über den Pol ${over ? 'ja' : 'nein'} (phi ${(0.3 - 0.8).toFixed(1)}), Drehpunkt bleibt ${still ? 'stehen' : 'nicht stehen'}, zurück ${back ? 'ok' : 'falsch'}`);
+  }
 
   // Zwei Finger umeinander drehen: Modell dreht sich mit den Fingern (Drehteller), Abstand bleibt;
   // kleines Verdrehen beim Zoomen dreht nicht. Im Handy- und im Tablet-Modus.

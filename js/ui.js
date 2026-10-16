@@ -162,12 +162,12 @@ export function toast(msg, ms = 2600) {
 }
 
 const NAV = {
-  tablet: `<li><b>1 Finger ziehen</b> – Ansicht drehen</li>
+  tablet: `<li><b>1 Finger ziehen</b> – Ansicht drehen, um den angefassten Punkt und frei über oben und unten hinweg</li>
         <li><b>2 Finger</b> – verschieben und zoomen, <b>umeinander drehen</b> – Modell rundum drehen</li>
         <li>Sobald der <b>Apple Pencil</b> benutzt wurde, zeichnet nur noch der Stift; Finger navigieren</li>`,
-  phone: `<li><b>2 Finger ziehen</b> – verschieben, <b>spreizen</b> – zoomen, <b>umeinander drehen</b> – Modell rundum drehen</li>
-        <li><b>3 Finger ziehen</b> – Ansicht drehen und kippen</li>
-        <li><b>1 Finger</b> – nur tippen und zeichnen</li>`,
+  phone: `<li><b>1 Finger ziehen</b> – Ansicht drehen, um den angefassten Punkt und frei über oben und unten hinweg; <b>tippen</b> – wählen</li>
+        <li><b>2 Finger ziehen</b> – verschieben, <b>spreizen</b> – zoomen, <b>umeinander drehen</b> – Modell rundum drehen</li>
+        <li>In Zeichenwerkzeugen zeichnet 1 Finger – dann mit <b>3 Fingern</b> drehen</li>`,
   pc: `<li><b>Linke Maustaste</b> – wählen und zeichnen; auf freier Fläche ziehen dreht</li>
         <li><b>Rechte Taste</b> ziehen – drehen, <b>mittlere Taste</b> oder <b>Umschalt + links</b> – verschieben, <b>Rad</b> – zoomen</li>
         <li>Tasten: <b>V</b> Auswahl, <b>L</b> Linie, <b>R</b> Rechteck, <b>C</b> Kreis, <b>A</b> Bogen, <b>Entf</b> löschen, <b>Esc</b> abbrechen, <b>Strg+Z/Y</b></li>`,

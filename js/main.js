@@ -1758,8 +1758,8 @@ addEventListener('keydown', e => {
 });
 
 // ---------------------------------------------------------------- Gerät und Steuerung
-// iPad: 1 Finger dreht, 2 verschieben/zoomen, Pencil zeichnet. Handy: 1 Finger zeichnet/tippt, 2 Finger
-// verschieben und zoomen, 3 Finger drehen. Beide: 2 Finger umeinander drehen = Drehteller. PC: Maus und
+// iPad: 1 Finger dreht, 2 verschieben/zoomen, Pencil zeichnet. Handy: 1 Finger zeichnet in Zeichenwerkzeugen,
+// sonst dreht er; 2 Finger verschieben und zoomen, 3 Finger drehen immer. Beide: 2 Finger umeinander drehen = Drehteller. PC: Maus und
 // Tastatur (Touch wie iPad).
 const DEVICES = { tablet: 'iPad', phone: 'Handy', pc: 'PC' };
 function setDevice(device) {
@@ -1808,6 +1808,8 @@ async function init() {
   UI.buildRail($('rail'), RAIL, railPick);
   buildTop();
   vp.tool = selectTool;
+  vp.pickPivot = (x, y) => vp.ray(x, y).intersectObjects(bodyMeshes(), false)[0]?.point ?? null;
+  vp.modelBox = sceneBox;
   let saved = null;
   try { saved = localStorage.getItem('form3d-device'); } catch { /* privater Modus */ }
   vp.device = DEVICES[saved] ? saved : guessDevice();

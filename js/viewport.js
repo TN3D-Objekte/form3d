@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { TransformControls } from '../vendor/TransformControls.js';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const wrapPi = a => ((a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
 
 export class Viewport {
   constructor(canvas, overlay) {
@@ -23,12 +24,16 @@ export class Viewport {
     this.raycaster = new THREE.Raycaster();
     this.tool = null;
     this.penSeen = false;
-    // Gerät: 'tablet' (1 Finger dreht, 2 verschieben/zoomen), 'phone' (1 Finger nur Werkzeug/Tippen,
-    // 2 Finger verschieben + zoomen, 3 Finger drehen), 'pc' (Maus; Touch wie Tablet)
+    // Gerät: 'tablet' (1 Finger dreht, 2 verschieben/zoomen), 'phone' (1 Finger zeichnet in Zeichenwerkzeugen,
+    // sonst dreht er; 2 Finger verschieben + zoomen, 3 Finger drehen), 'pc' (Maus; Touch wie Tablet)
     this.device = 'tablet';
     this._anim = 0;
     this.onOverlay = null;
     this.onBeforeRender = null;
+    // von außen gesetzt: Punkt auf dem Modell unter dem Finger (Drehpunkt) und Umriss aller Körper
+    this.pickPivot = null;
+    this.modelBox = null;
+    this.pivotMark = null;
 
     this._buildGrid();
     this.gizmo = new TransformControls(this.camera, canvas); // vor den eigenen Listenern, damit der Gizmo Vorrang hat
@@ -85,9 +90,12 @@ export class Viewport {
     this.requestRender();
   }
 
+  // phi läuft frei über die Pole hinweg (−π…π): „oben“ der Kamera ist die Richtung, in die phi abnimmt,
+  // dadurch gibt es am Pol keinen Sprung – hinter dem Pol steht das Modell eben auf dem Kopf.
   applyView() {
-    const { target, dist, theta, phi } = this.view, s = Math.sin(phi);
-    this.camera.position.set(target.x + dist * s * Math.cos(theta), target.y + dist * s * Math.sin(theta), target.z + dist * Math.cos(phi));
+    const { target, dist, theta, phi } = this.view, s = Math.sin(phi), c = Math.cos(phi);
+    this.camera.position.set(target.x + dist * s * Math.cos(theta), target.y + dist * s * Math.sin(theta), target.z + dist * c);
+    this.camera.up.set(-c * Math.cos(theta), -c * Math.sin(theta), s);
     this.camera.lookAt(target);
     this.camera.near = dist / 200;
     this.camera.far = dist * 50 + 5000;
@@ -128,6 +136,12 @@ export class Viewport {
     this.renderer.render(this.scene, this.camera);
     this.ctx.clearRect(0, 0, this.w, this.h);
     this.onOverlay?.(this.ctx);
+    const pv = this._pv ||= new THREE.Vector3();
+    if (this.pivotMark && this.project(this.pivotMark, pv)) { // Drehpunkt während des Drehens
+      const g = this.ctx;
+      g.beginPath(); g.arc(pv.x, pv.y, 5, 0, 2 * Math.PI);
+      g.fillStyle = 'rgba(59,130,246,0.9)'; g.strokeStyle = '#fff'; g.lineWidth = 2; g.fill(); g.stroke();
+    }
   }
 
   // ---- Hilfen für Werkzeuge ----
@@ -172,9 +186,8 @@ export class Viewport {
   // ---- Kamerasteuerung ----
   animateTo(to, ms = 380) {
     const v = this.view, from = { target: v.target.clone(), dist: v.dist, theta: v.theta, phi: v.phi };
-    const tgt = to.target || from.target, dist = to.dist ?? from.dist, phi = to.phi ?? from.phi;
-    let dth = (to.theta ?? from.theta) - from.theta;
-    dth = ((dth + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+    const tgt = to.target || from.target, dist = to.dist ?? from.dist;
+    const dth = wrapPi((to.theta ?? from.theta) - from.theta), dph = wrapPi((to.phi ?? from.phi) - from.phi);
     const t0 = performance.now(), id = ++this._anim;
     const step = () => {
       if (this._anim !== id) return;
@@ -182,7 +195,7 @@ export class Viewport {
       v.target.lerpVectors(from.target, tgt, e);
       v.dist = from.dist + (dist - from.dist) * e;
       v.theta = from.theta + dth * e;
-      v.phi = from.phi + (phi - from.phi) * e;
+      v.phi = wrapPi(from.phi + dph * e);
       this.render();
       if (k < 1) requestAnimationFrame(step);
     };
@@ -206,6 +219,31 @@ export class Viewport {
     const s = box.getBoundingSphere(new THREE.Sphere());
     const half = THREE.MathUtils.degToRad(this.camera.fov / 2) * Math.min(1, this.camera.aspect);
     this.animateTo({ target: s.center, dist: clamp(s.radius / Math.sin(half) * 1.25, 20, 8000) });
+  }
+
+  // Ansicht um den Punkt `pivot` drehen (null = um die Bildmitte): Blickrichtung ändern und das Ziel so
+  // mitführen, dass der Drehpunkt auf dem Bildschirm stehen bleibt. Ziehen nach rechts dreht immer
+  // gleich herum, auch wenn das Modell nach einem Überschlag auf dem Kopf steht.
+  orbit(dx, dy, pivot) {
+    const v = this.view;
+    this.applyView();
+    const q0 = this.camera.quaternion.clone();
+    v.theta = wrapPi(v.theta - dx * 0.008 * (Math.sin(v.phi) < 0 ? -1 : 1));
+    v.phi = wrapPi(v.phi - dy * 0.008);
+    this.applyView();
+    if (pivot) v.target.sub(pivot).applyQuaternion(this.camera.quaternion.clone().multiply(q0.invert())).add(pivot);
+    this.requestRender();
+  }
+
+  // Drehpunkt für eine Geste bei (x, y): getroffener Punkt auf dem Modell, sonst die Modellmitte, wenn sie
+  // im Bild liegt, sonst die Bildmitte (null)
+  pivotAt(x, y) {
+    const hit = this.pickPivot?.(x, y);
+    if (hit) return hit;
+    const box = this.modelBox?.();
+    if (!box || box.isEmpty()) return null;
+    const c = box.getCenter(new THREE.Vector3()), s = new THREE.Vector3();
+    return this.project(c, s) && s.x >= 0 && s.x <= this.w && s.y >= 0 && s.y <= this.h ? c : null;
   }
 
   _bindInput() {
@@ -237,7 +275,12 @@ export class Viewport {
     const centroid = () => { const t = touches(); return { x: t.reduce((s, p) => s + p.x, 0) / t.length, y: t.reduce((s, p) => s + p.y, 0) / t.length }; };
     // Mehrfinger-Geste (neu) beginnen – auch wenn Finger dazukommen oder abheben, damit nichts springt
     const startGesture = () => {
-      if (this.twoFinger && touches().length >= 3) { mode = 'orbit3'; pinch = centroid(); return; }
+      if (this.twoFinger && touches().length >= 3) {
+        mode = 'orbit3'; pinch = centroid();
+        this.pivotMark = this.pivotAt(pinch.x, pinch.y);
+        return;
+      }
+      this.pivotMark = null;
       mode = 'pinch';
       const m = mid();
       pinch = { d: m.d, dist: v.dist, x: m.x, y: m.y, a: m.a, tw: 0 };
@@ -261,7 +304,7 @@ export class Viewport {
       down = { id: e.pointerId, x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, moved: false, button: e.button };
       if (e.pointerType === 'mouse' && e.button === 2) { mode = 'orbit'; down.moved = true; return; }
       if (e.pointerType === 'mouse' && (e.button === 1 || e.button === 0 && e.shiftKey)) { mode = 'pan'; grab = this.viewPlanePoint(e.clientX, e.clientY); return; }
-      mode = this.tool?.onDown?.(ev(e)) ? 'tool' : this.twoFinger && e.pointerType === 'touch' ? 'tap' : 'orbit';
+      mode = this.tool?.onDown?.(ev(e)) ? 'tool' : 'orbit';
     });
 
     el.addEventListener('pointermove', e => {
@@ -271,10 +314,8 @@ export class Viewport {
       if (mode === 'orbit3') { // Handy: drei Finger gemeinsam ziehen = drehen
         if (p.type !== 'touch') return;
         const c = centroid();
-        v.theta -= (c.x - pinch.x) * 0.008;
-        v.phi = clamp(v.phi - (c.y - pinch.y) * 0.008, 0.001, Math.PI - 0.001);
+        this.orbit(c.x - pinch.x, c.y - pinch.y, this.pivotMark);
         pinch = c;
-        this.requestRender();
         return;
       }
       if (mode === 'pinch') { // zwei Finger gemeinsam ziehen = verschieben, spreizen = zoomen zur Fingermitte
@@ -286,31 +327,30 @@ export class Viewport {
       }
       if (!down || e.pointerId !== down.id) return;
       if (mode === 'tool') this.tool?.onMove?.(ev(e));
-      else if (mode === 'tap') { if (Math.hypot(e.clientX - down.x, e.clientY - down.y) >= 7) down.moved = true; }
       else if (mode === 'orbit') {
         if (!down.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 7) return;
         if (!down.moved) { down.moved = true; down.lx = e.clientX; down.ly = e.clientY; }
-        v.theta -= (e.clientX - down.lx) * 0.008;
-        v.phi = clamp(v.phi - (e.clientY - down.ly) * 0.008, 0.001, Math.PI - 0.001);
+        if (down.pivot === undefined) down.pivot = this.pivotMark = this.pivotAt(down.x, down.y);
+        this.orbit(e.clientX - down.lx, e.clientY - down.ly, down.pivot);
         down.lx = e.clientX; down.ly = e.clientY;
-        this.requestRender();
       } else if (mode === 'pan') zoomAt(e.clientX, e.clientY, v.dist);
     });
 
     const end = (e, cancelled) => {
       if (!pts.delete(e.pointerId)) return;
       if (mode === 'pinch' || mode === 'orbit3') {
-        if (touches().length >= 2) startGesture(); else { mode = null; down = null; grab = null; }
+        if (touches().length >= 2) startGesture(); else { mode = null; down = null; grab = null; this.pivotMark = null; this.requestRender(); }
         return;
       }
       if (!down || e.pointerId !== down.id) return;
       if (mode === 'tool') cancelled ? this.tool?.onCancel?.() : this.tool?.onUp?.(ev(e));
-      else if ((mode === 'orbit' || mode === 'tap') && !down.moved && !cancelled) {
+      else if (mode === 'orbit' && !down.moved && !cancelled) {
         const now = performance.now();
         const dbl = now - lastTap.t < 380 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 24;
         lastTap = { t: dbl ? 0 : now, x: e.clientX, y: e.clientY };
         if (dbl && this.tool?.onDoubleTap) this.tool.onDoubleTap(ev(e)); else this.tool?.onTap?.(ev(e));
       }
+      if (this.pivotMark) { this.pivotMark = null; this.requestRender(); }
       mode = null; down = null; grab = null;
     };
     el.addEventListener('pointerup', e => end(e, false));
