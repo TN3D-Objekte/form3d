@@ -15,6 +15,7 @@ import { exportSTL, exportOBJ, export3MF, download, share } from './exporters.js
 import * as Bug from './bugrec.js';
 import { checkPrint, bestOrientation, setOverhang, OVER, THIN, GAP, LIMITS } from './printcheck.js';
 import * as Parts from './parts.js';
+import { runBauplan, fromHash } from './bauplan.js';
 
 const $ = id => document.getElementById(id);
 const V3 = a => new THREE.Vector3(a[0], a[1], a[2]);
@@ -1527,6 +1528,9 @@ function openMenu() {
     { label: 'Neues Projekt', onClick: () => { if (!doc.bodies.length && !doc.sketches.length || confirm('Aktuelles Projekt verwerfen?')) newDoc(false); } },
     { label: 'Beispielteil laden', onClick: () => { if (!doc.bodies.length && !doc.sketches.length || confirm('Aktuelles Projekt durch das Beispiel ersetzen?')) newDoc(true); } },
     '-',
+    { label: 'Bauplan einfügen (KI) …', onClick: openBauplanDialog },
+    window.form3d.lastBauplan ? { label: 'Bauplan-Bericht', onClick: showBauplanReport } : null,
+    '-',
     { label: 'Projekt als Datei sichern', onClick: () => download(doc.name + '.form3d', toFile(), 'application/json') },
     { label: 'Projektdatei öffnen …', onClick: () => $('file').click() },
     '-',
@@ -1559,6 +1563,79 @@ $('file').addEventListener('change', async e => {
     UI.toast('Datei konnte nicht geöffnet werden');
   }
 });
+
+// ---------------------------------------------------------------- Bauplan (Modell als Text, z. B. von einer KI)
+// Baut den Bauplan und übernimmt die Körper: replace = neues Projekt, sonst anfügen. Liefert den Bericht.
+function loadBauplan(text, replace) {
+  let res;
+  try { res = runBauplan(text); } catch (e) { return { ok: false, fehler: e.message }; }
+  resetSession();
+  endSketch();
+  setSelectTool();
+  if (replace) Object.assign(doc, { name: res.name, bodies: [], sketches: [], nextId: 1 });
+  for (const b of res.bodies) {
+    const nb = addBody(b.mesh);
+    Object.assign(nb, { name: b.name, features: b.features });
+    const c = ['grau', 'rot', 'orange', 'gruen', 'blau', 'violett', 'weiss', 'dunkel'].indexOf(b.color);
+    if (c >= 0) nb.color = COLORS[c];
+    seams(nb);
+  }
+  if (replace) resetHistory(); else commit();
+  vp.fit(sceneBox());
+  const out = { ok: res.ok, schritte: res.report, koerper: res.bodies.map(b => b.info) };
+  window.form3d.lastBauplan = out;
+  const err = res.report.filter(r => !r.ok);
+  UI.toast(err.length ? `Bauplan: ${err.length} Schritt${err.length > 1 ? 'e' : ''} mit Fehler – Bericht im Menü` : `Bauplan gebaut: ${res.bodies.length} Körper`, 4000);
+  if (err.length) showBauplanReport();
+  return out;
+}
+
+// Bericht des letzten Bauplans: zum Zurückgeben an die KI kopierbar
+function showBauplanReport() {
+  const r = window.form3d.lastBauplan;
+  if (!r) return UI.toast('Noch kein Bauplan gebaut');
+  const text = JSON.stringify(r, null, 1);
+  UI.openDialog('Bauplan-Bericht', [
+    UI.h('p', {}, r.ok ? 'Alle Schritte gebaut.' : 'Einige Schritte sind fehlgeschlagen. Den Bericht der KI geben, damit sie den Bauplan korrigiert.'),
+    UI.h('pre', {}, text),
+  ], [
+    { label: 'Bericht kopieren', onClick: () => { navigator.clipboard?.writeText(text).then(() => UI.toast('Bericht kopiert')); return true; } },
+    { label: 'Schließen', primary: true },
+  ]);
+}
+
+function openBauplanDialog() {
+  const ta = UI.h('textarea', { placeholder: '{ "format": "form3d-bauplan/1", "schritte": [ … ] }', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off' });
+  const run = replace => () => {
+    if (!ta.value.trim()) { UI.toast('Erst den Bauplan einfügen'); return true; }
+    if (replace && (doc.bodies.length || doc.sketches.length) && !confirm('Aktuelles Projekt durch den Bauplan ersetzen?')) return true;
+    const r = loadBauplan(ta.value, replace);
+    if (r.fehler) { UI.toast(r.fehler, 6000); return true; }
+    return false;
+  };
+  UI.openDialog('Bauplan einfügen', [
+    UI.h('p', { html: 'Ein Bauplan beschreibt ein Modell als Text. Eine KI (z.&nbsp;B. Claude oder ChatGPT) kann ihn schreiben, wenn sie die <a href="bauplan.html" target="_blank">Bauplan-Anleitung</a> bekommt. Den Bauplan hier einfügen:' }),
+    ta,
+  ], [
+    { label: 'Anleitung für KI', onClick: () => { window.open('bauplan.html', '_blank'); return true; } },
+    { label: 'Zum Projekt hinzufügen', onClick: run(false) },
+    { label: 'Als neues Projekt bauen', primary: true, onClick: run(true) },
+    { label: 'Abbrechen' },
+  ]);
+  setTimeout(() => ta.focus(), 50);
+}
+
+// Link mit #bauplan=… (Base64) oder ?bauplan=<Adresse einer JSON-Datei> öffnen
+async function bauplanFromUrl() {
+  const hash = location.hash.match(/^#bauplan=(.+)$/), q = new URLSearchParams(location.search).get('bauplan');
+  if (!hash && !q) return;
+  let text;
+  try { text = hash ? fromHash(hash[1]) : await (await fetch(q)).text(); } catch (e) { return UI.toast('Bauplan im Link nicht lesbar: ' + e.message, 6000); }
+  if ((doc.bodies.length || doc.sketches.length) && !confirm('Bauplan aus dem Link öffnen? Das aktuelle Projekt wird ersetzt.')) return;
+  const r = loadBauplan(text, true);
+  if (r.fehler) UI.toast(r.fehler, 6000);
+  history.replaceState(null, '', location.pathname + location.search.replace(/[?&]bauplan=[^&]*/, '').replace(/^&/, '?'));
+}
 
 // Beispiel: Grundplatte mit vier Bohrungen, Nabe und Durchgangsbohrung
 function buildDemo() {
@@ -1801,11 +1878,12 @@ async function init() {
   if ('serviceWorker' in navigator && isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-window.form3d = { doc, vp, st, sel, sketch, body, railPick, pick, applyOp, sync, refresh: () => { sync(); refreshOp(); }, appState, replayStart, makeExtrude, resolveMode };
+window.form3d = { doc, vp, st, sel, sketch, body, railPick, pick, applyOp, sync, refresh: () => { sync(); refreshOp(); }, appState, replayStart, makeExtrude, resolveMode, bauplan: loadBauplan };
 init().then(() => {
   const q = new URLSearchParams(location.search);
   if (q.has('selftest')) import('../tests/selftest.js');
   if (q.has('replay')) import('../tests/replay.js');
+  return bauplanFromUrl();
 }).catch(err => {
   console.error(err);
   $('loading').textContent = 'Start fehlgeschlagen: ' + (err?.message || err);

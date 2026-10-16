@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#eef0f4">
+<link rel="icon" href="icons/icon-180.png">
+<title>Form3D – Modelle von einer KI bauen lassen</title>
+<style>
+  :root { --bg: #eef0f4; --card: #fff; --text: #111827; --body: #344054; --muted: #667085; --accent: #2563eb; --line: rgba(17, 24, 39, 0.1); }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 32px); }
+  main { max-width: 760px; margin: 0 auto; background: var(--card); border-radius: 20px; padding: 24px 26px; box-shadow: 0 6px 24px rgba(16, 24, 40, 0.12); }
+  h1 { font-size: 25px; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 30px 0 8px; color: var(--accent); }
+  p, li { color: var(--body); }
+  ol, ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  a { color: var(--accent); }
+  .back { display: inline-block; margin-bottom: 16px; text-decoration: none; font-weight: 600; }
+  .lead { color: var(--body); margin: 6px 0 18px; }
+  .note { background: var(--bg); border-radius: 12px; padding: 10px 14px; color: var(--body); margin: 12px 0; }
+  button, .btn { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 10px 14px; background: var(--accent); color: #fff; cursor: pointer; text-decoration: none; display: inline-block; }
+  .btn.light { background: var(--bg); color: var(--text); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  pre { background: var(--bg); border-radius: 12px; padding: 12px; overflow-x: auto; font-size: 13px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  @media (max-width: 500px) { main { padding: 18px 16px; } h1 { font-size: 22px; } }
+</style>
+</head>
+<body>
+<main>
+<a class="back" href="index.html">← zurück zu Form3D</a>
+<h1>Modelle von einer KI bauen lassen</h1>
+<p class="lead">Eine KI wie Claude oder ChatGPT kann für Form3D einen <b>Bauplan</b> schreiben: eine Textbeschreibung des
+Modells, Schritt für Schritt. Form3D baut daraus echte Körper – mit Rundungen, Fasen und Schraubenlöchern, die du danach
+wie gewohnt bearbeiten kannst.</p>
+
+<h2>So geht’s</h2>
+<ol>
+  <li><b>Anleitung kopieren</b> und der KI geben – oder ihr den Link zur Anleitung nennen:
+    <div class="row">
+      <button id="copy">Anleitung für KI kopieren</button>
+      <a class="btn light" href="bauplan.md" target="_blank">Anleitung ansehen</a>
+    </div>
+    <span class="muted" id="copied"></span></li>
+  <li>Dazu schreiben, was du brauchst, zum Beispiel:
+    <pre>Erstelle einen Form3D-Bauplan nach dieser Anleitung: Wandhalter für eine
+Bohrmaschine, 3 mm Wandstärke, zwei Senklöcher M4 zum Anschrauben.</pre></li>
+  <li>Den Bauplan aus der Antwort kopieren (den Block, der mit <code>{</code> beginnt).</li>
+  <li>In Form3D: <b>Menü → Bauplan einfügen (KI)</b>, einfügen, <b>Als neues Projekt bauen</b>.</li>
+  <li>Geht ein Schritt schief, zeigt Form3D einen <b>Bericht</b>. „Bericht kopieren“ und der KI zurückgeben –
+    sie korrigiert den Bauplan.</li>
+</ol>
+<div class="note">KIs mit Internetzugang können die Anleitung auch selbst lesen:
+<b><span id="mdlink">https://tn3d-objekte.github.io/form3d/bauplan.md</span></b></div>
+
+<h2>Beispiele</h2>
+<p>Direkt in Form3D öffnen (ersetzt nach Rückfrage das aktuelle Projekt):</p>
+<div class="row" id="examples"><span class="muted">wird geladen …</span></div>
+
+<h2>Bauplan per Link teilen</h2>
+<p>Ein Link der Form <code>index.html#bauplan=…</code> enthält den ganzen Bauplan und öffnet ihn direkt. Alternativ lädt
+<code>index.html?bauplan=&lt;Adresse&gt;</code> eine Bauplan-Datei aus dem Netz – dann ruft die App diese Adresse ab.</p>
+<p class="muted">Privates Testprojekt · <a href="datenschutz.html">Datenschutz &amp; Lizenzen</a></p>
+</main>
+<script type="module">
+import { toLink } from './js/bauplan.js';
+const md = new URL('bauplan.md', location.href).href;
+document.getElementById('mdlink').textContent = md;
+let text = '';
+try { text = await (await fetch('bauplan.md')).text(); } catch { /* offline ohne Cache */ }
+document.getElementById('copy').onclick = async () => {
+  const msg = document.getElementById('copied');
+  try { await navigator.clipboard.writeText(text || md); msg.textContent = 'Kopiert – jetzt in die KI einfügen und dein Teil beschreiben.'; } catch { msg.textContent = 'Kopieren nicht möglich – bitte „Anleitung ansehen“ öffnen und den Text markieren.'; }
+};
+const ex = document.getElementById('examples');
+ex.replaceChildren();
+for (const [, name, json] of text.matchAll(/## Beispiel: (.+)\n\n```json\n([\s\S]*?)```/g)) {
+  ex.append(Object.assign(document.createElement('a'), { className: 'btn light', href: toLink(json.trim(), 'index.html'), textContent: name }));
+}
+if (!ex.children.length) ex.textContent = 'Beispiele nicht verfügbar (offline).';
+</script>
+</body>
+</html>

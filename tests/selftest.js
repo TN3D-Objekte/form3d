@@ -668,6 +668,18 @@ try {
       `${phone ? 'Handy' : 'Tablet'}: 2 Finger 60° im Uhrzeigersinn gedreht → Modell ${(da * 180 / Math.PI).toFixed(0)}° mitgedreht, Abstand ${(vp.view.dist / d0).toFixed(2)}, kleines Verdrehen ${still ? 'ignoriert' : 'dreht!'}`);
   }
   vp.twoFinger = false;
+  // Bauplan: die Beispiele aus der KI-Anleitung bauen fehlerfrei, ein falscher Schritt wird mit Grund gemeldet
+  {
+    const md = await (await fetch('bauplan.md')).text(), res = [];
+    for (const [, name, json] of md.matchAll(/## Beispiel: (.+)\n\n```json\n([\s\S]*?)```/g)) {
+      const r = window.form3d.bauplan(json, true);
+      res.push(`${name}: ${r.ok ? 'ok' : JSON.stringify(r.schritte?.filter(s => !s.ok) || r.fehler)}, ${doc.bodies.length} Körper, ${doc.bodies.map(b => b.features?.length || 0).join('/')} Rundungen/Fasen`);
+    }
+    const bad = window.form3d.bauplan({ schritte: [{ op: 'quader', name: 'A', l: 10, b: 10, h: 5 }, { op: 'rundung', ziel: 'A', r: 1, kanten: { z: 99 } }] }, true);
+    const why = bad.schritte?.[1]?.fehler || '';
+    log(res.length >= 2 && res.every(x => x.includes(': ok')) && !bad.ok && /keine Kante|Kein Kantenfilter/i.test(why), `Bauplan-Beispiele: ${res.join(' · ')}; Fehlermeldung: ${why}`);
+    document.getElementById('help').hidden = true;
+  }
   out.textContent += 'DONE\n';
 } catch (e) {
   if (e !== 0) log(false, 'Ausnahme: ' + (e.stack || e));

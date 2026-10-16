@@ -173,6 +173,15 @@ const NAV = {
         <li>Tasten: <b>V</b> Auswahl, <b>L</b> Linie, <b>R</b> Rechteck, <b>C</b> Kreis, <b>A</b> Bogen, <b>Entf</b> löschen, <b>Esc</b> abbrechen, <b>Strg+Z/Y</b></li>`,
 };
 
+// Dialog im Hilfe-Rahmen: Titel, Inhalt, Schaltflächen [{ label, primary?, onClick }] (Rückgabe true = offen lassen)
+export function openDialog(title, body, buttons) {
+  const el = document.getElementById('help'), close = () => (el.hidden = true);
+  el.replaceChildren(h('div', { class: 'help-card dialog' }, h('h2', {}, title), ...body,
+    h('div', { class: 'dialog-btns' }, ...buttons.map(b => h('button', { class: 'btn' + (b.primary ? ' primary' : ''), onclick: () => { if (!b.onClick?.()) close(); } }, b.label)))));
+  el.hidden = false;
+  return close;
+}
+
 export function showHelp(device = 'tablet', onDevice) {
   const el = document.getElementById('help');
   el.replaceChildren(h('div', { class: 'help-card' },
@@ -208,6 +217,9 @@ export function showHelp(device = 'tablet', onDevice) {
         <li><b>Druckteile</b> links: Schraubenloch (Senkkopf, Zylinderkopf; <b>Kernloch</b> d − P zum direkten Einschrauben oder Durchgang), Mutternfalle, Gewinde (innen oder Bolzen) M2–M12 – Körperfläche antippen, Größe und Länge unten wählen</li>
         <li>Menü → <b>An Slicer senden (3MF)</b> öffnet das Teilen-Menü (z. B. Bambu Handy, Prusa); Export auch als 3MF, STL, OBJ</li>
         <li>Menü → <b><a href="tipps.html">Tipps für den 3D-Druck</a></b>: Winkel, Schrauben, Passungen, Wände, Festigkeit</li></ul></div>
+      <div><h3>Mit KI entwerfen</h3><ul>
+        <li>Eine KI (Claude, ChatGPT …) schreibt nach der <a href="bauplan.html">Bauplan-Anleitung</a> einen Bauplan für dein Teil</li>
+        <li>Menü → <b>Bauplan einfügen (KI)</b> – Form3D baut die Körper; Rundungen und Löcher bleiben bearbeitbar</li></ul></div>
       <div><h3>Fehler melden</h3><ul>
         <li>Menü → <b>Fehler aufzeichnen</b>, Fehler nachstellen, <b>Hier!</b> im richtigen Moment, dann <b>Fertig</b></li>
         <li>Die Datei mit kurzer Beschreibung teilen oder sichern und weitergeben</li></ul></div>` }),

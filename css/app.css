@@ -140,6 +140,11 @@ button:disabled { opacity: 0.32; cursor: default; }
 .help-card li { margin: 3px 0; }
 .help-foot { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
 .help-foot a { color: var(--muted); }
+.dialog { width: min(720px, 100%); }
+.dialog p { margin: 0 0 10px; color: #344054; }
+.dialog textarea { width: 100%; min-height: 220px; box-sizing: border-box; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; border: 1px solid var(--line); border-radius: 10px; padding: 10px; resize: vertical; }
+.dialog pre { max-height: 280px; overflow: auto; background: #f4f5f8; border-radius: 10px; padding: 10px; font-size: 12px; white-space: pre-wrap; margin: 0 0 10px; }
+.dialog-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 
 .help-device { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; font-weight: 600; color: #344054; flex-wrap: wrap; }
 
