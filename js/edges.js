@@ -182,6 +182,7 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
   // Feinheit des Bogens nach dem stärksten Bogen der ganzen Kante – nicht nach dem ersten Profil, sonst hinge das
   // Werkzeug davon ab, wo die Kette im Netz beginnt
   const nArc = Math.max(...frames.map(f => profile(f.p, f.tau, f.N1, f.N2, kind, size, sgn, 0).nArc));
+  if (!grow) fitsFaces(mesh, segs, kind, size, sgn, surf);
   const rings = [];
   for (let i = 0; i < M; i++) {
     const { near, tau, N1, N2, p } = frames[i];
@@ -295,6 +296,40 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
   }
 
   return { convex, mesh: tube(rings, chain.closed), trim };
+}
+
+// Ist die Rundung/Fase breiter als eine Nachbarfläche und knickt die Oberfläche dahinter nach innen (z. B. schmale
+// Fläche vor einer Kerbe), endete der Rand einer Außenrundung im Material – das Werkzeug schnitte eine Stufe in die
+// nächste Fläche; bei Innenrundungen hinge der Rand entsprechend in der Luft. Dann: Radius zu groß. Läuft der Rand
+// dagegen ins Freie (dünne Wand, Rundungen beider Seiten berühren sich), bleibt es erlaubt.
+// Geprüft wird in der Mitte jedes Kantenstücks (an den Enden darf der Rand über eine schräg anstoßende Fläche
+// hinausragen). Ein Randpunkt passt, wenn er auf einer Fläche mit etwa der Normale der Nachbarfläche liegt (Spielraum
+// für gekrümmte Flächen) oder auf einer vorhandenen Rundung; sonst entscheidet, ob er im Körper liegt.
+function fitsFaces(mesh, segs, kind, size, sgn, surf) {
+  const { fn } = analyze(mesh), v = mesh.v;
+  const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]], nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
+  const step = Math.max(1, Math.ceil(segs.length / 64));
+  for (let k = 0; k < segs.length; k += step) {
+    const s = segs[k], a = P(s.u), b = P(s.v), m = add(a, sub(b, a), 0.5), tau = norm(sub(b, a));
+    const { ring, d } = profile(m, tau, nrm(s.t1), nrm(s.t2), kind, size, sgn, 0, 0, surf);
+    for (const [q, n] of [[ring[0], nrm(s.t1)], [ring[4], nrm(s.t2)]]) {
+      const tol = 0.1 * d + 0.01;
+      if (surf.some(f => (f.blend || dot(f.n, n) > 0.9) && Math.hypot(...sub(closestOnTri(q, f.c), q)) < tol)) continue;
+      if (inside(mesh, q) === sgn > 0) throw new Error('Radius zu groß für diese Kante');
+    }
+  }
+}
+
+// Liegt q im Körper? Summe der Raumwinkel aller Dreiecke (Van Oosterom/Strackee): 4π innen, 0 außen
+function inside(mesh, q) {
+  const { v, t } = mesh;
+  let w = 0;
+  for (let i = 0; i < t.length; i += 3) {
+    const [a, b, c] = [t[i], t[i + 1], t[i + 2]].map(j => [v[3 * j] - q[0], v[3 * j + 1] - q[1], v[3 * j + 2] - q[2]]);
+    const la = Math.hypot(...a), lb = Math.hypot(...b), lc = Math.hypot(...c);
+    w += 2 * Math.atan2(dot(a, cross(b, c)), la * lb * lc + dot(a, b) * lc + dot(b, c) * la + dot(c, a) * lb);
+  }
+  return w > 2 * Math.PI;
 }
 
 // Dreiecke in der Nähe der Kette (Abstand bis reach), um Profilendpunkte genau auf die Fläche zu legen;

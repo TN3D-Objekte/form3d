@@ -116,7 +116,7 @@ function section(M, Rm, bad, size) {
 // Hängt ein Fall länger als LIMIT, wird sein Worker beendet und der Fall als ZEITLIMIT gemeldet.
 const LIMIT = 90000;
 async function runMany(from, n, workers, post) {
-  const all = [], queue = Array.from({ length: n }, (_, i) => from + i);
+  const all = [], queue = Array.from({ length: n }, (_, i) => from + i), retried = new Set();
   let pending = [];
   const flush = last => {
     if (!post || (!last && pending.length < 25)) return null;
@@ -126,8 +126,10 @@ async function runMany(from, n, workers, post) {
   };
   const fail = (id, code, why) => ({ id, fail: true, steps: [{ codes: { [code]: 1 }, sig: { [code]: why } }] });
   // Manifold gibt seinen WASM-Speicher im Worker nie zurück: Worker nach RECYCLE Fällen ersetzen, sonst wächst
-  // der Speicher mit jedem Fall, bis das System den Lauf abbricht
-  const RECYCLE = 25;
+  // der Speicher mit jedem Fall, bis das System den Lauf abbricht. recycle=1: jeder Fall in einem frischen Worker –
+  // langsamer, aber unabhängig von den vorher gelaufenen Fällen (fortlaufende Kennungen in Manifold verändern die
+  // Dreiecke minimal), also für Vorher/Nachher-Vergleiche
+  const RECYCLE = +(q.get('recycle') || 25);
   const slot = async () => {
     let w = null, used = 0;
     while (queue.length) {
@@ -141,6 +143,8 @@ async function runMany(from, n, workers, post) {
         w.onerror = e => { clearTimeout(timer); w.terminate(); w = null; res(fail(id, 'WORKER', String(e.message).slice(0, 60))); };
         w.postMessage(id);
       });
+      // Worker, die gar nicht erst starten (unter Last gelegentlich), einmal wiederholen
+      if (r.steps?.[0]?.codes?.WORKER && !retried.has(id)) { retried.add(id); queue.unshift(id); continue; }
       all.push(r);
       pending.push(r);
       flush(false);

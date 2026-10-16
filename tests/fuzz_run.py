@@ -1,6 +1,6 @@
 """Fuzz-Test für Rundung/Fase (siehe tests/fuzzlib.js).
 
-  python tests/fuzz_run.py --cases 1000 [--start 0] [--procs 6]
+  python tests/fuzz_run.py --cases 1000 [--start 0] [--procs 6] [--recycle 1]
 
 Startet einen lokalen Server und headless Edge mit tests/fuzz.html?from=..&n=.. (Fälle laufen in Workern), sammelt die Ergebnisse in
 tests/fuzz-out/results.jsonl und gibt die Fehlergruppen (Prüfregel · Ort · Rundung/Fase) nach Häufigkeit aus.
@@ -35,10 +35,10 @@ def serve():
     return srv.server_address[1]
 
 
-def run(port, start, n, workers, t0):
+def run(port, start, n, workers, t0, recycle):
     """Eine Edge-Instanz; die Seite verteilt die Fälle auf Worker und meldet die Ergebnisse stückweise."""
     prof = tempfile.mkdtemp(prefix='fuzz-edge-')
-    url = f'http://127.0.0.1:{port}/tests/fuzz.html?from={start}&n={n}&workers={workers}&post=1'
+    url = f'http://127.0.0.1:{port}/tests/fuzz.html?from={start}&n={n}&workers={workers}&recycle={recycle}&post=1'
     p = subprocess.Popen([EDGE, '--headless=new', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', f'--user-data-dir={prof}', url],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -74,10 +74,11 @@ def main():
     ap.add_argument('--cases', type=int, default=200)
     ap.add_argument('--start', type=int, default=0)
     ap.add_argument('--procs', type=int, default=max(1, (os.cpu_count() or 4) - 2), help='Worker')
+    ap.add_argument('--recycle', type=int, default=25, help='Fälle je Worker; 1 = jeder Fall frisch (reproduzierbar, für Vergleiche)')
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     port, t0 = serve(), time.time()
-    results = run(port, a.start, a.cases, a.procs, t0)
+    results = run(port, a.start, a.cases, a.procs, t0, a.recycle)
     results.sort(key=lambda r: r['id'])
     with open(os.path.join(OUT, 'results.jsonl'), 'w', encoding='utf-8') as f:
         for r in results: f.write(json.dumps(r, ensure_ascii=False) + '\n')
