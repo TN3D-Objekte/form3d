@@ -2,6 +2,7 @@
 import { planeFromNormal, to2D } from './sketch.js';
 
 const COS_EDGE = Math.cos(25 * Math.PI / 180);
+const STEP = 0.01; // mm: niedrigere Dreiecke gelten als Splitter (siehe analyze)
 const COS_CREASE = Math.cos(40 * Math.PI / 180);
 const cacheMap = new WeakMap();
 // Übergänge zwischen zwei Rundungen je Netz ({ tag, links: [a, b] }): Ihre Ränder sind tangential und werden
@@ -58,14 +59,16 @@ export function analyze(mesh) {
   // Splitter aus Booleschen Operationen (fast ohne Höhe) haben eine zufällige Normale und oft keine
   // Kennung. Sie übernehmen beides vom nächsten echten Dreieck an ihren langen Kanten (auch über
   // gestapelte Splitter hinweg), sonst erzeugen sie Kanten mitten in Rundungen und verbinden Flächen,
-  // die nicht zusammengehören.
+  // die nicht zusammengehören. Ebenso alle Dreiecke unter STEP Höhe: Wo zwei Rundungen fast flach
+  // ineinanderlaufen, bleiben Stufen von wenigen Tausendstel Millimetern stehen – unsichtbar und für den
+  // Druck bedeutungslos, aber als Kante gezeichnet eine ausgefranste Linie.
   const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]], longEdges = new Map();
   for (let i = 0; i < nT; i++) {
     if (!fa[i]) continue;
     const p = [0, 1, 2].map(k => P(t[3 * i + k]));
     const L = [0, 1, 2].map(k => Math.hypot(p[(k + 1) % 3][0] - p[k][0], p[(k + 1) % 3][1] - p[k][1], p[(k + 1) % 3][2] - p[k][2]));
     const Lm = Math.max(...L), h = 2 * fa[i] / Lm;
-    if (h < 1e-4 || h < 1e-4 * Lm) longEdges.set(i, [0, 1, 2].filter(e => L[e] >= 0.5 * Lm).sort((a, b) => L[b] - L[a]).map(e => nb[3 * i + e]).filter(j => j >= 0));
+    if (h < STEP || h < 1e-4 * Lm) longEdges.set(i, [0, 1, 2].filter(e => L[e] >= 0.5 * Lm).sort((a, b) => L[b] - L[a]).map(e => nb[3 * i + e]).filter(j => j >= 0));
   }
   const donor = new Map();
   for (const i of longEdges.keys()) {

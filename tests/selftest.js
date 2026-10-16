@@ -29,6 +29,13 @@ try {
   const vol = K.props(doc.bodies[0].mesh).volume;
   log(doc.bodies.length === 1 && Math.abs(vol - 37888) < 400, `Demo-Körper, Volumen ${vol.toFixed(0)} (Soll ~37888)`);
 
+  // Mikrostufe (5 µm), wie sie zwischen fast flach ineinanderlaufenden Rundungen stehen bleibt: keine Kante
+  {
+    const H = 0.005, v = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, H, 1, 1, H, 2, 0, H, 2, 1, H]);
+    const t = new Uint32Array([0, 1, 2, 0, 2, 3, 1, 4, 5, 1, 5, 2, 4, 6, 7, 4, 7, 5]);
+    log(analyze({ v, t }).sharp.length === 0, 'Mikrostufe von 5 µm erzeugt keine Kante');
+  }
+
   // Körperfläche (Oberseite der Nabe bei z=26) antippen → Drücken/Ziehen
   tap(...scr(11.5, 0, 26));
   log(st.op?.type === 'extrude' && st.op.face && Math.abs(st.op.plane.o[2] - 26) < 1e-3, 'Fläche gewählt, Ebene z=' + st.op?.plane.o[2]);
