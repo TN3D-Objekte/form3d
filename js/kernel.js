@@ -123,18 +123,35 @@ export function toolMesh(t) {
   return m;
 }
 
+// Frei schwebende Krümel (unter CRUMB mm³), die Boolesche Operationen an fast berührenden Flächen hinterlassen,
+// entfernen – im Slicer wären es Phantomteile
+const CRUMB = 0.01;
+function dropCrumbs(mesh) {
+  const parts = toManifold(mesh).decompose();
+  const keep = parts.filter(p => p.volume() >= CRUMB);
+  if (keep.length === parts.length || !keep.length) return mesh;
+  return toMesh(Manifold.compose(keep));
+}
+
 // Verrundung/Fase: Werkzeuge an konvexen Kanten abziehen, an konkaven anfügen. Je Werkzeug wird das
 // entfernte bzw. hinzugefügte Volumen gemerkt, damit sich die Rundung später wieder löschen lässt.
 export function blendFeatures(mesh, tools) {
-  const ms = tools.map(toolMesh);
-  for (const m of ms) if (!m || toManifold(m).isEmpty()) throw new Error('Werkzeugkörper ungültig');
+  let ms = tools.map(toolMesh);
+  if (ms.some(m => !m)) throw new Error('Werkzeugkörper ungültig');
+  // Werkzeuge ohne Volumen (Splitterkanten von wenigen Hundertstel Millimetern aus Booleschen Operationen) ändern nichts
+  const full = ms.map(m => !toManifold(m).isEmpty());
+  if (!full.some(Boolean)) throw new Error('Werkzeugkörper ungültig');
+  tools = tools.filter((_, i) => full[i]);
+  ms = ms.filter((_, i) => full[i]);
   const cut = ms.filter((_, i) => tools[i].convex), fill = ms.filter((_, i) => !tools[i].convex);
   let r = mesh;
-  if (cut.length) r = boolean('subtract', r, unionAll(cut));
-  if (r && fill.length) r = boolean('union', r, unionAll(fill));
+  const c = cut.length && unionAll(cut), f = fill.length && unionAll(fill);
+  if (c) r = boolean('subtract', r, c);
+  if (r && f) r = boolean('union', r, f);
+  r = r && dropCrumbs(r);
   const features = tools.map((t, i) => ({
     tag: t.tag, kind: t.kind, size: t.size, convex: t.convex, links: t.links, tool: ms[i],
-    region: boolean(t.convex ? 'intersect' : 'subtract', t.heal ? toolMesh({ ...t, tag: 0, mesh: t.heal }) : ms[i], mesh),
+    region: boolean(t.convex ? 'intersect' : 'subtract', (t.heal && toolMesh({ ...t, tag: 0, mesh: t.heal })) || ms[i], mesh),
   })).filter(x => x.tag && x.region);
   return { mesh: r, features };
 }
@@ -195,7 +212,7 @@ export const unblend = (mesh, features, keep) => unblendFeatures(mesh, features,
 // Geschlecht (Anzahl Durchgangslöcher) und Zahl der Teilkörper – für den Fuzz-Test
 export function topology(mesh) {
   const m = toManifold(mesh), parts = m.decompose();
-  return { genus: m.genus(), parts: parts.length };
+  return { genus: m.genus(), parts: parts.length, volumes: parts.map(p => p.volume()).sort((a, b) => b - a) };
 }
 // Volumen von a ohne b (0, wenn nichts übrig bleibt)
 export const volumeMinus = (a, b) => { const r = toManifold(a).subtract(toManifold(b)); return r.isEmpty() ? 0 : r.volume(); };

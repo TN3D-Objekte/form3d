@@ -73,9 +73,13 @@ const flip = c => ({ ...c, segs: c.segs.slice().reverse().map(g => ({ s: g.s, u:
 
 // Gewählte Kanten, die tangential aneinander anschließen, zu einer Kette verbinden (z. B. gerade
 // Kante + Bogen + gerade Kante rund um eine verrundete Ecke), damit das Werkzeug durchläuft.
+// Nur Kanten zwischen denselben (bzw. tangential weiterlaufenden) Flächen: Läuft eine gerade Kante über eine Ecke
+// hinweg zwischen anderen Flächen weiter (z. B. außen → innen), wäre das Profil an der Naht flach.
 export function joinChains(mesh, chains) {
-  const v = mesh.v, P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
+  const v = mesh.v, P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]], { fn } = analyze(mesh);
   const d = (g) => norm(sub(P(g.v), P(g.u)));
+  const nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
+  const sameFaces = (g, h) => dot(nrm(g.t1), nrm(h.t1)) > COS_BEND && dot(nrm(g.t2), nrm(h.t2)) > COS_BEND;
   let list = chains.filter(c => !c.closed);
   const done = chains.filter(c => c.closed);
   for (let joined = true; joined;) {
@@ -86,9 +90,9 @@ export function joinChains(mesh, chains) {
         let b = list[j];
         const ae = a.segs[a.segs.length - 1].v;
         if (b.segs[b.segs.length - 1].v === ae) b = flip(b);
-        if (b.segs[0].u !== ae || dot(d(a.segs[a.segs.length - 1]), d(b.segs[0])) <= COS_BEND) continue;
+        if (b.segs[0].u !== ae || dot(d(a.segs[a.segs.length - 1]), d(b.segs[0])) <= COS_BEND || !sameFaces(a.segs[a.segs.length - 1], b.segs[0])) continue;
         const segs = [...a.segs, ...b.segs], f = segs[0], l = segs[segs.length - 1];
-        const c = { segs, pts: [...a.pts, ...b.pts.slice(1)], closed: l.v === f.u && dot(d(l), d(f)) > COS_BEND };
+        const c = { segs, pts: [...a.pts, ...b.pts.slice(1)], closed: l.v === f.u && dot(d(l), d(f)) > COS_BEND && sameFaces(l, f) };
         list = list.filter((_, k) => k !== i && k !== j);
         (c.closed ? done : list).push(c);
         joined = true;
@@ -226,7 +230,7 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
       }
       const ring = vi === s.u ? rings[0] : rings[rings.length - 1], p = P(vi);
       const R = Math.max(...ring.map(q => Math.hypot(...sub(q, p))));
-      const len = c => { const cc = Math.max(c, 0.3); return R * (0.25 + Math.sqrt(1 - cc * cc) / cc); };
+      const len = c => { const cc = Math.min(1, Math.max(c, 0.3)); return R * (0.25 + Math.sqrt(1 - cc * cc) / cc); };
       const c = convex ? lo : -hi;
       if (c >= 0.05) {
         // Die Verlängerung bleibt nur hinter (beim Abziehen: vor) der Endfläche, wenn das Profil nicht seitlich
@@ -465,6 +469,8 @@ export function cornerTools(mesh, chains, kind, size) {
     const sgn = list[0].convex ? 1 : -1, d = ns.map(n => n.map(x => x * sgn));
     const det = dot(d[0], cross(d[1], d[2]));
     if (Math.abs(det) < 0.05) continue;
+    // An sehr spitzen Kanten (unter 60°) faltet sich das Kugelstück über sich selbst – dort ohne Kugelecke
+    if (d.some((a, i) => dot(a, d[(i + 1) % 3]) < -0.5)) continue;
     // Mittelpunkt: Abstand size zu allen drei Flächen (d_i · (C − p) = −size)
     const p = P(vi), x = [cross(d[1], d[2]), cross(d[2], d[0]), cross(d[0], d[1])].reduce((a, b) => add(a, b)).map(c => -size * c / det);
     const C = add(p, x);

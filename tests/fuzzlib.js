@@ -246,6 +246,8 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
   // 1. Topologie
   const t0 = K.topology(M), t1 = K.topology(Rm);
   if (t0.parts !== t1.parts) flag('TEILE', t1.parts - t0.parts);
+  const info = {};
+  if (t0.parts !== t1.parts) info.teilvolumen = t1.volumes.slice(t0.parts).map(v => +v.toPrecision(2)).slice(0, 4).join('/');
   if (t0.genus !== t1.genus) flag('GESCHLECHT', t1.genus - t0.genus);
 
   // 2. Nur auf der richtigen Seite: Außenkanten nehmen nur weg, Innenkanten fügen nur an
@@ -326,7 +328,7 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
   const looseM = new Set(loose(M, anM)), frays = loose(Rm, anR).filter(k => !looseM.has(k)).map(k => k.split(',').map(Number)).filter(q => near(q) < lim);
   if (frays.length) flag('FRANSEN', frays.length, frays);
 
-  return { codes, bad, sig: signature(M, chains, selIdx, codes, bad, reach) };
+  return { codes, bad, info, sig: signature(M, chains, selIdx, codes, bad, reach) };
 }
 
 // Ort eines Fehlers zur Gruppierung: an welcher Art Ecke (gewählte/nicht gewählte, konvex/konkav) er liegt
@@ -371,11 +373,13 @@ export function runCase(id, keep = false) {
     try { r = applyEdges(b, pick.idx.map(i => chains[i]), kind, size); } catch (e) {
       if (/Radius zu groß/.test(e.message)) { step.reject = true; break; }
       step.codes = { AUSNAHME: 1 }; step.sig = { AUSNAHME: String(e.message).slice(0, 60) };
+      if (keep) res.last = { M: b.mesh, b, picked: pick.idx.map(i => chains[i]), error: e };
       break;
     }
     try {
       const c = check(b.mesh, r.mesh, pick.idx, kind, size, b.features.length > 0);
       step.codes = c.codes; step.sig = c.sig;
+      if (Object.keys(c.info).length) step.info = c.info;
       if (keep) res.last = { M: b.mesh, R: r.mesh, bad: c.bad };
       if (Object.keys(c.codes).length) { step.bad = Object.fromEntries(Object.entries(c.bad).map(([k, v]) => [k, v.slice(0, 3).map(q => q.map(x => +x.toFixed(2)))])); break; }
     } catch (e) { step.codes = { PRÜFFEHLER: 1 }; step.sig = { PRÜFFEHLER: String(e.message).slice(0, 60) }; break; }
