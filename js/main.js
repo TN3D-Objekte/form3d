@@ -1,6 +1,7 @@
 // Form3D – Anwendungslogik: Szene, Auswahl, Werkzeuge und Operationen.
 import * as THREE from 'three';
 import { Viewport } from './viewport.js';
+import { ViewCube } from './viewcube.js';
 import * as K from './kernel.js';
 import * as S from './sketch.js';
 import { analyze, faceTriangles, faceCentroid, faceLoops, smoothSurface, hideSeams } from './meshview.js';
@@ -22,6 +23,9 @@ const DRAW = ['line', 'rect', 'circle', 'arc'];
 const isDraw = t => DRAW.includes(t);
 
 const vp = new Viewport($('gl'), $('overlay'));
+const cube = new ViewCube($('viewcube'), vp);
+vp.onAfterRender = () => cube.render();
+vp.cube = cube;
 const sel = { bodies: [], face: null, regions: [], ents: [], edges: [], con: null };
 const st = { tool: 'select', sketchId: null, pickPlane: false, pendingTool: null, xf: null, last: null, refs: [], check: false };
 // Aktiver Vorgang. Wird ein Vorgang mit restore (Rundung/Fase bearbeiten) anders als über Fertig verlassen,

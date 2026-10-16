@@ -164,6 +164,11 @@ button:disabled { opacity: 0.32; cursor: default; }
 }
 #gridchip b { color: var(--text); font-weight: 650; }
 
+#viewcube {
+  position: fixed; right: var(--right); bottom: calc(var(--bottom) + 44px); z-index: 2;
+  width: 104px; height: 104px; touch-action: none; cursor: pointer;
+}
+
 /* ---- Druckprüfung ---- */
 #check {
   position: fixed; left: 50%; top: calc(var(--top) + 56px); transform: translateX(-50%); z-index: 3;
@@ -207,6 +212,7 @@ button:disabled { opacity: 0.32; cursor: default; }
   #panel { width: 190px; }
   #bar { max-width: calc(100% - 20px); }
   #gridchip { bottom: calc(var(--bottom) + 66px); }
+  #viewcube { width: 92px; height: 92px; bottom: calc(var(--bottom) + 106px); }
   #help { padding: 12px; }
   .help-card { padding: 18px 16px; }
 }

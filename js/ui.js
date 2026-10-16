@@ -183,6 +183,7 @@ export function showHelp(device = 'tablet', onDevice) {
     h('div', { class: 'help-grid', html: `
       <div><h3>Navigieren</h3><ul>
         ${NAV[device] || NAV.tablet}
+        <li><b>Ansichtswürfel</b> unten rechts: Fläche, Kante oder Ecke antippen – in diese Ansicht springen; am Würfel ziehen – drehen</li>
         <li><b>Menü → Leisten anordnen</b> – Leisten und Meldungen verschieben, getrennt für Hoch- und Querformat</li></ul></div>
       <div><h3>Skizzieren</h3><ul>
         <li>Linie, Rechteck, Kreis oder Bogen wählen, dann <b>Ebene oder Körperfläche antippen</b></li>

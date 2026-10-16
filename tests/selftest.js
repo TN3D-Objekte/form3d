@@ -586,6 +586,28 @@ try {
     log(over && still && back, `Freies Drehen: über den Pol ${over ? 'ja' : 'nein'} (phi ${(0.3 - 0.8).toFixed(1)}), Drehpunkt bleibt ${still ? 'stehen' : 'nicht stehen'}, zurück ${back ? 'ok' : 'falsch'}`);
   }
 
+  // Ansichtswürfel: Fläche antippen = Ansicht von dort, Kante = dazwischen, ziehen = drehen.
+  // Kamerafahrten sofort ans Ziel setzen (ohne Bildwechsel im Headless-Browser läuft keine Animation).
+  {
+    const cv = document.getElementById('viewcube'), cube = vp.cube, animate = vp.animateTo;
+    vp.animateTo = to => { Object.assign(vp.view, { theta: to.theta ?? vp.view.theta, phi: to.phi ?? vp.view.phi }); vp.render(); };
+    const cfire = (type, [x, y], id) => cv.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true }));
+    const ctap = (p, id) => { cfire('pointerdown', p, id); cfire('pointerup', p, id); };
+    vp.setView('iso');
+    ctap(cube.screenOf([0.05, 0, 0.5]), 960);
+    const top = Math.abs(vp.view.phi) < 1e-3;
+    vp.setView('iso');
+    ctap(cube.screenOf([0.5, -0.5, 0]), 961);
+    const edge = Math.abs(vp.view.phi - Math.PI / 2) < 1e-3 && Math.abs(vp.view.theta + Math.PI / 4) < 1e-3;
+    const th2 = vp.view.theta, c0 = cube.screenOf([0, 0, 0]);
+    cfire('pointerdown', c0, 962);
+    for (let i = 1; i <= 5; i++) cfire('pointermove', [c0[0] + 8 * i, c0[1]], 962);
+    cfire('pointerup', [c0[0] + 40, c0[1]], 962);
+    const turned = Math.abs(vp.view.theta - th2) > 0.3;
+    vp.animateTo = animate;
+    log(top && edge && turned, `Ansichtswürfel: Oben ${top ? 'ok' : 'falsch'}, Kante vorne-rechts ${edge ? 'ok' : 'falsch'}, ziehen dreht ${turned ? 'ja' : 'nein'}`);
+  }
+
   // Zwei Finger umeinander drehen: Modell dreht sich mit den Fingern (Drehteller), Abstand bleibt;
   // kleines Verdrehen beim Zoomen dreht nicht. Im Handy- und im Tablet-Modus.
   const twistBy = (ang, id0) => {

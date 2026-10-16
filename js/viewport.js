@@ -30,6 +30,7 @@ export class Viewport {
     this._anim = 0;
     this.onOverlay = null;
     this.onBeforeRender = null;
+    this.onAfterRender = null;
     // von außen gesetzt: Punkt auf dem Modell unter dem Finger (Drehpunkt) und Umriss aller Körper
     this.pickPivot = null;
     this.modelBox = null;
@@ -142,6 +143,7 @@ export class Viewport {
       g.beginPath(); g.arc(pv.x, pv.y, 5, 0, 2 * Math.PI);
       g.fillStyle = 'rgba(59,130,246,0.9)'; g.strokeStyle = '#fff'; g.lineWidth = 2; g.fill(); g.stroke();
     }
+    this.onAfterRender?.();
   }
 
   // ---- Hilfen für Werkzeuge ----

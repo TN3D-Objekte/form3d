@@ -6,7 +6,7 @@ import { h } from './ui.js';
 const ITEMS = [
   ['top-file', 'Menü'], ['top-hist', 'Rückgängig'], ['top-view', 'Ansichten'],
   ['rail', 'Werkzeuge'], ['panel', 'Elemente'], ['bar', 'Werkzeugoptionen'], ['numpad', 'Ziffernblock'],
-  ['toast', 'Meldungen'], ['check', 'Druckprüfung'], ['gridchip', 'Raster'],
+  ['toast', 'Meldungen'], ['check', 'Druckprüfung'], ['gridchip', 'Raster'], ['viewcube', 'Ansichtswürfel'],
 ];
 const CENTER = new Set(['bar', 'numpad', 'toast', 'check']); // per CSS mittig (translateX(-50%))
 const DUMMY = new Set(['bar', 'numpad', 'toast', 'check']); // beim Anordnen mit Platzhalter zeigen
