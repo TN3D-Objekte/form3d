@@ -117,7 +117,10 @@ button:disabled { opacity: 0.32; cursor: default; }
 .np-keys button.ok { grid-column: span 2; background: var(--accent); color: #fff; border-color: transparent; font-size: 16px; font-weight: 650; }
 
 /* ---- Menü, Hinweise, Hilfe ---- */
-#menu { position: fixed; left: var(--left); top: calc(var(--top) + 56px); min-width: 250px; padding: 6px; z-index: 6; }
+#menu {
+  position: fixed; left: var(--left); top: calc(var(--top) + 56px); min-width: 250px; padding: 6px; z-index: 6;
+  max-height: calc(100% - var(--top) - 56px - var(--bottom)); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+}
 #menu button { display: block; width: 100%; text-align: left; height: 44px; padding: 0 12px; border-radius: 9px; font-weight: 500; }
 #menu button:active { background: rgba(17, 24, 39, 0.08); }
 #menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 8px; }
