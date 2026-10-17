@@ -103,7 +103,7 @@ function solidOf(s, step) {
 
 // ---------------------------------------------------------------- Kantenauswahl
 const DIRS = { oben: [0, 0, 1], unten: [0, 0, -1], vorne: [0, -1, 0], hinten: [0, 1, 0], links: [-1, 0, 0], rechts: [1, 0, 0] };
-function selectEdges(mesh, sel, step) {
+export function selectEdges(mesh, sel, step) {
   const chains = edgeChains(mesh), { fn } = analyze(mesh);
   const nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -154,6 +154,18 @@ function selectEdges(mesh, sel, step) {
   };
   const tests = (Array.isArray(sel) ? sel : [sel]).map(one);
   return chains.filter(c => tests.some(t => t(c)));
+}
+
+// Welche Kanten sind schuld an „Radius zu groß“? Jede einzeln versuchen (nur bei wenigen Kanten, sonst zu langsam)
+// und die Mitten der gescheiterten nennen, damit die KI sie mit "bereich"/"nahe" ausnehmen kann.
+function tooBig(b, picked, kind, size) {
+  if (picked.length < 2 || picked.length > 40) return '';
+  const bad = picked.filter(c => {
+    try { applyEdges(b, [c], kind, size); return false; } catch (e) { return /Radius zu groß/.test(e.message); }
+  });
+  if (!bad.length) return ' (einzeln geht jede Kante – zusammen nicht)';
+  const mid = c => c.pts[Math.floor(c.pts.length / 2)].map(x => +x.toFixed(1));
+  return ` (an ${bad.length} von ${picked.length} Kanten, z. B. bei ${bad.slice(0, 3).map(c => JSON.stringify(mid(c))).join(', ')})`;
 }
 
 // ---------------------------------------------------------------- Druckteile
@@ -230,8 +242,10 @@ export function runBauplan(plan) {
         r.kanten = picked.length;
         if (!picked.length) throw new Error(`${step}: Kein Kantenfilter hat eine Kante getroffen`);
         let res;
-        try { res = applyEdges(b, picked, s.op === 'rundung' ? 'fillet' : 'chamfer', size); } catch (e) {
-          throw new Error(`${step}: ${/Radius zu groß/.test(e.message) ? 'Radius zu groß für diese Kanten – kleineren Wert versuchen' : 'mit diesem Maß nicht möglich (' + e.message + ')'}`);
+        const kind = s.op === 'rundung' ? 'fillet' : 'chamfer';
+        try { res = applyEdges(b, picked, kind, size); } catch (e) {
+          if (!/Radius zu groß/.test(e.message)) throw new Error(`${step}: mit diesem Maß nicht möglich (${e.message})`);
+          throw new Error(`${step}: Radius zu groß für diese Kanten – kleineren Wert versuchen${tooBig(b, picked, kind, size)}`);
         }
         b.mesh = res.mesh;
         b.features = res.features;

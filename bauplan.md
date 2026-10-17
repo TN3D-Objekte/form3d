@@ -24,7 +24,7 @@ App baut echte Volumenkörper daraus. Rundungen, Fasen und Schraubenlöcher sind
 - **z zeigt nach oben**, die Druckplatte ist die Ebene z = 0. Baue Teile so, dass sie auf z = 0 stehen.
 - x nach rechts, y nach hinten. Richtungsnamen: `oben` +z, `unten` −z, `rechts` +x, `links` −x, `hinten` +y, `vorne` −y.
 - Jeder Grundkörper entsteht in seinem eigenen System mit dem **Boden-Mittelpunkt im Ursprung**
-  (Ausnahme: `profil`, siehe unten), wird dann um x, y, z gedreht (`drehen`) und an `pos` verschoben.
+  (Ausnahmen: `kugel` sitzt mit dem **Mittelpunkt** im Ursprung, `profil` siehe unten), wird dann um x, y, z gedreht (`drehen`) und an `pos` verschoben.
 
 ## Körper und Kombinieren
 
@@ -132,7 +132,8 @@ Rechtecks). Der Bericht meldet, wie viele Kanten ein Filter getroffen hat.
 2. Werkzeuge zum **Abziehen** etwas länger machen als das Material (z. B. Loch durch 8 mm Platte: `h` 10,
    `pos` z = −1), damit keine hauchdünne Haut stehen bleibt.
 3. Rundungsradius kleiner als die halbe Wandstärke und kleiner als die angrenzenden Flächen; sonst meldet die App
-   „Radius zu groß“.
+   „Radius zu groß“. Die Meldung nennt dann Punkte der Kanten, an denen es scheitert: Nimm diese Kanten mit einem
+   engeren Filter (`bereich`, `nahe`, `art`) aus oder runde sie in einem eigenen Schritt mit kleinerem Radius.
 4. Für den 3D-Druck: Wände ≥ 1,2 mm, Überhänge ≤ 45°, unten eine kleine Fase (0,4–0,6 mm) statt einer Rundung,
    Passungen mit 0,15–0,3 mm Spiel je Seite.
 5. Namen von Körpern genau wiederverwenden (Groß-/Kleinschreibung zählt).
