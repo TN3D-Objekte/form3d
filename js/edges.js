@@ -217,6 +217,8 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
   // an der Ebene der Endfläche abgeschnitten (trim); geht auch das nicht, endet es knapp davor.
   const trim = [];
   if (!chain.closed) {
+    const taper = (vi, out, s) => runout(mesh, chain, chains, vi, out, s, kind, size, sgn, grow, rings[0].length === 5 ? 0 : rings[0].length - 4, surf);
+    const r0 = taper(segs[0].u, dirs[0].map(x => -x), segs[0]), r1 = taper(segs[m - 1].v, dirs[m - 1], segs[m - 1]);
     const endExt = (vi, out, s) => {
       const n1 = nrm(s.t1), n2 = nrm(s.t2), ends = [];
       let lo = 1, hi = -1;
@@ -288,14 +290,72 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
       trim.push({ n: keep, o });
       return len(flat ? Math.abs(ce) : 1);
     };
-    const e0 = endExt(segs[0].u, dirs[0].map(x => -x), segs[0]), e1 = endExt(segs[m - 1].v, dirs[m - 1], segs[m - 1]);
-    if (e0 > 0) rings.unshift(rings[0].map(q => add(q, dirs[0], -e0)));
+    const e0 = r0 ? 0 : endExt(segs[0].u, dirs[0].map(x => -x), segs[0]), e1 = r1 ? 0 : endExt(segs[m - 1].v, dirs[m - 1], segs[m - 1]);
+    if (r0) rings.unshift(...r0.reverse());
+    else if (e0 > 0) rings.unshift(rings[0].map(q => add(q, dirs[0], -e0)));
     else rings[0] = rings[0].map(q => add(q, dirs[0], GAP));
-    if (e1 > 0) rings.push(rings[rings.length - 1].map(q => add(q, dirs[m - 1], e1)));
+    if (r1) rings.push(...r1);
+    else if (e1 > 0) rings.push(rings[rings.length - 1].map(q => add(q, dirs[m - 1], e1)));
     else rings[rings.length - 1] = rings[rings.length - 1].map(q => add(q, dirs[m - 1], -GAP));
   }
 
   return { convex, mesh: tube(rings, chain.closed), trim };
+}
+
+// Auslauf: Geht die Kante am Ende vi tangential in eine nicht gewählte scharfe Kante über (z. B. der Bogen um eine
+// gefüllte Innenecke in die Unterkante der Nachbarwand), endete die Rundung dort mit einer Stufe. Stattdessen läuft
+// sie entlang dieser Kante weiter und wird auf RUNOUT · Radius weich bis auf (fast) null kleiner. Liefert die
+// Profile von vi weg oder null.
+const RUNOUT = 3;
+function runout(mesh, chain, chains, vi, out, s0, kind, size, sgn, grow, nArc, surf) {
+  const { fn, tg, sharp, sharpTri } = analyze(mesh), v = mesh.v;
+  const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]], nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
+  const n1 = nrm(s0.t1), n2 = nrm(s0.t2), COS_TAN = Math.cos(20 * Math.PI / 180);
+  const taken = (a, b) => chains.some(c => c.segs.some(g => (g.u === a && g.v === b) || (g.u === b && g.v === a)));
+  const path = []; // Kantenstücke [a, b, N1, N2]
+  let at = vi, from = s0.u === vi ? s0.v : s0.u, dir = out, len = 0;
+  const L = RUNOUT * size;
+  while (len < L && path.length < 200) {
+    const inc = [];
+    for (let k = 0; k < sharp.length; k += 2) {
+      if ((sharp[k] === at && sharp[k + 1] !== from) || (sharp[k + 1] === at && sharp[k] !== from)) inc.push(k);
+      if (inc.length > 1) break;
+    }
+    if (inc.length !== 1) break; // nur über Punkte, an denen genau diese beiden Kanten zusammentreffen
+    const k = inc[0], next = sharp[k] === at ? sharp[k + 1] : sharp[k], ed = norm(sub(P(next), P(at)));
+    if (dot(ed, dir) < COS_TAN || taken(at, next)) break;
+    // nicht am Rand einer vorhandenen Rundung/Fase entlang: Wird sie gelöscht, muss das gespeicherte Werkzeug die
+    // Ecke bis zum Ende nachschneiden (kernel.unblendFeatures) statt dort auszulaufen
+    if (tg[sharpTri[k]] || tg[sharpTri[k + 1]]) break;
+    let na = nrm(sharpTri[k]), nb = nrm(sharpTri[k + 1]);
+    if (dot(na, n1) + dot(nb, n2) < dot(nb, n1) + dot(na, n2)) [na, nb] = [nb, na];
+    if (dot(na, n1) < COS_BEND || dot(nb, n2) < COS_BEND) break;
+    path.push([P(at), P(next), na, nb]);
+    len += Math.hypot(...sub(P(next), P(at)));
+    from = at; at = next; dir = ed;
+  }
+  if (!path.length) return null;
+  const Lt = Math.min(L, len), tau0 = vi === chain.segs[0].u ? -1 : 1; // Profile in Laufrichtung der Kette
+  // Abtastung: gleichmäßig bis zur halben Länge, dann zur Spitze hin immer feiner (aufeinanderfolgende Profile
+  // ähnlich groß, sonst verdrehte Dreiecke und Kantenkrümel an der Spitze)
+  const fs = [];
+  for (let i = 1; i <= 6; i++) fs.push(1 - 0.5 * i / 6);
+  for (let f = 0.5 * 0.75; f > 0.035; f *= 0.75) fs.push(f);
+  fs.push(0);
+  const rings = [], n = fs.length;
+  let walked = 0, j = 0;
+  for (let i = 1; i <= n; i++) {
+    const x = Lt * (1 - fs[i - 1]);
+    while (j < path.length - 1 && walked + Math.hypot(...sub(path[j][1], path[j][0])) < x) { walked += Math.hypot(...sub(path[j][1], path[j][0])); j++; }
+    const [a, b, N1, N2] = path[j], sl = Math.hypot(...sub(b, a)), p = add(a, norm(sub(b, a)), Math.min(sl, x - walked));
+    const f = 1 - x / Lt, sz = size * Math.max(0.004, f * f * (3 - 2 * f));
+    const tau = norm(sub(b, a)).map(c => c * tau0);
+    let ring = profile(p, tau, N1, N2, kind, sz, sgn, grow, nArc, surf).ring;
+    // das letzte Profil ganz aus dem Körper heraus: Sonst bliebe an der Spitze ein winziger Deckel im Material
+    if (i === n) ring = ring.map(q => add(q, norm(add(N1, N2)), sgn * (0.01 + 0.01 * size)));
+    rings.push(ring);
+  }
+  return rings;
 }
 
 // Ist die Rundung/Fase breiter als eine Nachbarfläche und knickt die Oberfläche dahinter nach innen (z. B. schmale

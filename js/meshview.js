@@ -89,31 +89,33 @@ export function analyze(mesh) {
     const Lm = Math.max(...L), h = 2 * fa[i] / Lm;
     if (h < STEP || h < 1e-4 * Lm) longEdges.set(i, [0, 1, 2].filter(e => L[e] >= 0.5 * Lm).sort((a, b) => L[b] - L[a]).map(e => nb[3 * i + e]).filter(j => j >= 0));
   }
-  // Unter den echten Nachbarn bis einen Ring hinter dem ersten gewinnt der, in dessen Ebene der Splitter liegt: Liegt
-  // ein Splitter z. B. flach in der Deckfläche an einer Wand und grenzt er dort an einen zweiten Splitter, wäre die
-  // Wand der nächste echte Nachbar – mit ihrer Normale entstünde eine Scheinkante mitten in der Deckfläche.
+  // Gehört der Splitter selbst zu einer Rundung (z. B. an der Spitze eines Auslaufs, wo die ganze Rundung schmaler
+  // als STEP ist), bleibt er bei ihr (Normale möglichst von einem Nachbarn derselben Kennung)
+  // Sonst unter den echten Nachbarn bis einen Ring hinter dem ersten der, in dessen Ebene der Splitter liegt: Liegt ein
+  // Splitter z. B. flach in der Deckfläche an einer Wand, und grenzt er dort an einen zweiten Splitter, wäre die Wand
+  // der nächste echte Nachbar – mit ihrer Normale entstünde eine Scheinkante mitten in der Deckfläche.
   const donor = new Map();
   const off = (i, j) => { const n = [fn[3 * j], fn[3 * j + 1], fn[3 * j + 2]], o = P(t[3 * j]); return Math.max(...[0, 1, 2].map(k => { const p = P(t[3 * i + k]); return Math.abs(n[0] * (p[0] - o[0]) + n[1] * (p[1] - o[1]) + n[2] * (p[2] - o[2])); })); };
   for (const i of longEdges.keys()) {
     const seen = new Set([i]), cands = [];
-    let ring = [i], last = Infinity;
-    for (let k = 0; k < 8 && k <= last && ring.length; k++) {
+    let ring = [i], js = -1, last = Infinity;
+    for (let k = 0; k < (tg[i] ? 24 : 8) && k <= last && js < 0 && ring.length; k++) {
       const next = [];
       for (const s of ring) for (const n of longEdges.get(s)) {
         if (seen.has(n)) continue;
         seen.add(n);
-        if (!longEdges.has(n)) cands.push(n); else next.push(n);
+        if (!longEdges.has(n)) { cands.push(n); if (js < 0 && tg[i] && tg[n] === tg[i]) js = n; } else next.push(n);
       }
-      if (cands.length && last === Infinity) last = k + 1;
+      if (cands.length && !tg[i] && last === Infinity) last = k + 1;
       ring = next;
     }
     let j = cands.length ? cands[0] : -1;
     for (const c of cands) if (off(i, j) > 1e-3 && off(i, c) < 0.25 * off(i, j)) j = c; // nur bei deutlich besserer Lage
-    if (j >= 0) donor.set(i, j);
+    if (js >= 0 || j >= 0) donor.set(i, js >= 0 ? js : j);
   }
   for (const [i, j] of donor) {
     fn[3 * i] = fn[3 * j]; fn[3 * i + 1] = fn[3 * j + 1]; fn[3 * i + 2] = fn[3 * j + 2];
-    tg[i] = tg[j];
+    if (!tg[i]) tg[i] = tg[j];
   }
 
   // koplanare Nachbardreiecke zu Flächen zusammenfassen, scharfe Kanten sammeln. Innerhalb einer

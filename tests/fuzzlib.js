@@ -218,7 +218,7 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
   const chains = edgeChains(M), picked = selIdx.map(i => chains[i]), used = tangentChains(M, picked);
   const anM = analyze(M), P = i => [M.v[3 * i], M.v[3 * i + 1], M.v[3 * i + 2]];
   const segs = [], codes = {}, bad = {};
-  const flag = (code, val, pts = []) => { codes[code] = +(Math.max(codes[code] || 0, val)).toPrecision(3); (bad[code] ||= []).push(...pts); };
+  const flag = (code, val, pts = []) => { codes[code] = +(Math.abs(val) >= Math.abs(codes[code] || 0) ? val : codes[code]).toPrecision(3); (bad[code] ||= []).push(...pts); };
   // Rücksprung je Kette: Abstand der Rundungsränder von der Kante
   let reach = 0, expect = 0;
   for (const c of used) {
@@ -240,6 +240,23 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
   const shared = new Set([...chainEnds(M, used)].filter(([, l]) => l.length > 1).map(([k]) => k));
   const ends = used.filter(c => !c.closed).flatMap(c => [[c.segs[0].u, c.segs[0].v], [c.segs.at(-1).v, c.segs.at(-1).u]])
     .filter(([e]) => shared.has(vkey(M, e))).map(([e, f]) => { const a = P(e); return [a, add(a, norm(sub(a, P(f))), 4 * reach)]; });
+  // Die Rundung läuft entlang einer nicht gewählten Kante aus (edges.js runout), wo eine gewählte Kante tangential in
+  // sie übergeht, und an Ecken mit gewählten Außen- und Innenkanten (dort nach der Eckfüllung) entlang der nicht
+  // gewählten Außenkanten: Diese Kanten zählen auf RUNOUT · Radius mit
+  const usedSet = new Set(used), COS_TAN = Math.cos(20 * Math.PI / 180);
+  let runouts = 0;
+  const runSegs = [];
+  for (const [k, list] of chainEnds(M, used)) {
+    const cs = list.map(i => used[i]), mixed = cs.some(c => isConvex(M, c)) && cs.some(c => !isConvex(M, c));
+    const outs = cs.flatMap(c => [vkey(M, c.segs[0].u) === k && [norm(sub(c.pts[0], c.pts[1])), isConvex(M, c)], vkey(M, c.segs.at(-1).v) === k && [norm(sub(c.pts.at(-1), c.pts.at(-2))), isConvex(M, c)]].filter(Boolean));
+    for (const c of chains) {
+      if (usedSet.has(c) || c.closed) continue;
+      let pts = vkey(M, c.segs[0].u) === k ? c.pts : vkey(M, c.segs.at(-1).v) === k ? c.pts.slice().reverse() : null;
+      if (pts && !(mixed && isConvex(M, c)) && !outs.some(([d, cx]) => cx === isConvex(M, c) && dot(d, norm(sub(pts[1], pts[0]))) > COS_TAN)) pts = null;
+      if (pts) runouts++;
+      for (let i = 1, l = 0; pts && i < pts.length && l < 3 * size + reach; i++) { ends.push([pts[i - 1], pts[i]]); runSegs.push([pts[i - 1], pts[i]]); l += Math.hypot(...sub(pts[i], pts[i - 1])); }
+    }
+  }
   const near = q => { let m = Infinity; for (const [a, b] of [...segs, ...ends]) m = Math.min(m, segDist(q, a, b)); return m; };
   const tol = 0.02 + 0.02 * size, lim = reach * (hadFeatures ? 2 : 1) + tol;
 
@@ -271,7 +288,9 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
   // 4. Volumen grob wie erwartet (gerade Kantenstücke, ohne Ecken)
   const dv = K.props(Rm).volume - K.props(M).volume;
   const L = segs.reduce((s, [a, b]) => s + Math.hypot(...sub(b, a)), 0);
-  if (!hadFeatures && L > 20 * size && Math.abs(expect) > 0.05 && Math.abs(dv - expect) > 0.25 * Math.abs(expect) + 0.05) flag('VOLUMEN', +((dv - expect) / Math.abs(expect)).toFixed(2));
+  // ein Auslauf trägt etwa 0,24 · Radius³ (Rundung) bzw. 0,56 · Maß³ (Fase) zusätzlich ab (bei 90°; Spielraum für andere Winkel)
+  const runVol = runouts * (kind === 'fillet' ? 0.3 : 0.7) * size ** 3;
+  if (!hadFeatures && L > 20 * size && Math.abs(expect) > 0.05 && Math.abs(dv - expect) > 0.25 * Math.abs(expect) + 0.05 + runVol) { flag('VOLUMEN', +((dv - expect) / Math.abs(expect)).toFixed(2)); info.volumen = [dv, expect, runVol].map(x => +x.toFixed(2)).join(' / '); }
 
   // 5. Flächen ohne Rundungskennung müssen auf der alten Oberfläche liegen (sonst: Werkzeugdeckel, Stufen, Lappen).
   // Ausnahme: Endet eine Rundung allein an einer Ecke, darf ihr Ende in der Ebene einer dort anstoßenden Fläche
@@ -317,15 +336,32 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
   // 7. Ausgefranste Linien: scharfe Kanten, die im neuen Bereich lose enden (in einem sauberen Körper endet jede
   // scharfe Kante an einer Ecke mit weiteren Kanten). Ausgenommen sind Gehrungen zwischen zwei Rundungen/Fasen: Sie
   // laufen dort aus, wo beide tangential in dieselbe Fläche übergehen.
+  // Lose Enden, deren Kantenzug bis zur nächsten Verzweigung kürzer als 0,05 mm ist (Krümel an der Spitze eines
+  // Auslaufs, unter der Druckauflösung), zählen nicht.
   const loose = (mesh, an) => {
-    const deg = new Map(), miter = new Set();
+    const deg = new Map(), miter = new Set(), adj = new Map();
     for (let s = 0; s < an.sharp.length; s += 2) {
-      const m = an.tg[an.sharpTri[s]] && an.tg[an.sharpTri[s + 1]];
-      for (const i of [an.sharp[s], an.sharp[s + 1]]) { const k = vkey(mesh, an.weld[i]); deg.set(k, (deg.get(k) || 0) + 1); if (m) miter.add(k); }
+      const m = an.tg[an.sharpTri[s]] && an.tg[an.sharpTri[s + 1]], [ka, kb] = [an.sharp[s], an.sharp[s + 1]].map(i => vkey(mesh, an.weld[i]));
+      for (const k of [ka, kb]) { deg.set(k, (deg.get(k) || 0) + 1); if (m) miter.add(k); }
+      if (!adj.has(ka)) adj.set(ka, []);
+      if (!adj.has(kb)) adj.set(kb, []);
+      adj.get(ka).push(kb); adj.get(kb).push(ka);
     }
-    return [...deg].filter(([k, d]) => d === 1 && !miter.has(k)).map(([k]) => k);
+    const P3 = k => k.split(',').map(Number), runLen = k0 => {
+      let prev = null, k = k0, l = 0;
+      for (let n = 0; n < 1000 && l < 0.05; n++) {
+        const nx = adj.get(k).find(x => x !== prev);
+        if (nx === undefined) break;
+        l += Math.hypot(...sub(P3(nx), P3(k)));
+        prev = k; k = nx;
+        if (deg.get(k) !== 2) break;
+      }
+      return l;
+    };
+    return [...deg].filter(([k, d]) => d === 1 && !miter.has(k) && runLen(k) >= 0.05).map(([k]) => k);
   };
-  const looseM = new Set(loose(M, anM)), frays = loose(Rm, anR).filter(k => !looseM.has(k)).map(k => k.split(',').map(Number)).filter(q => near(q) < lim);
+  const looseM = new Set(loose(M, anM)), frays = loose(Rm, anR).filter(k => !looseM.has(k)).map(k => k.split(',').map(Number)).filter(q => near(q) < lim)
+    .filter(q => !runSegs.some(([a, b]) => segDist(q, a, b) < 0.02 + 0.01 * size)); // die Kante beginnt wieder, wo ein Auslauf endet
   if (frays.length) flag('FRANSEN', frays.length, frays);
 
   return { codes, bad, info, sig: signature(M, chains, selIdx, codes, bad, reach) };
