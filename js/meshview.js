@@ -4,6 +4,7 @@ import { planeFromNormal, to2D } from './sketch.js';
 const COS_EDGE = Math.cos(25 * Math.PI / 180);
 const STEP = 0.01; // mm: niedrigere Dreiecke gelten als Splitter (siehe analyze)
 const COS_CREASE = Math.cos(40 * Math.PI / 180);
+const WELD = 2e-5; // mm: so nahe Punkte gelten als derselbe Punkt
 const cacheMap = new WeakMap();
 // Übergänge zwischen zwei Rundungen je Netz ({ tag, links: [a, b] }): Ihre Ränder sind tangential und werden
 // nicht als Linie gezeichnet (sie verliefen auf den facettierten Rundungsflächen unruhig), ebenso die flache
@@ -31,18 +32,36 @@ export function analyze(mesh) {
   const fdot = (i, j) => fn[3 * i] * fn[3 * j] + fn[3 * i + 1] * fn[3 * j + 1] + fn[3 * i + 2] * fn[3 * j + 2];
 
   // Ecken an gleicher Position zusammenfassen: Boolesche Ergebnisse enthalten entartete Dreiecke
-  // mit doppelten Punkten, die sonst die Nachbarschaft der echten Dreiecke unterbrechen
-  const weld = new Int32Array(nV), at = new Map();
+  // mit doppelten Punkten, die sonst die Nachbarschaft der echten Dreiecke unterbrechen. Auch Punkte, die nur
+  // um Rundungsfehler auseinanderliegen (WELD): Sonst hängt zwischen ihnen ein Dreieck ohne Fläche, und eine
+  // durchgehende Kante (z. B. der Rand einer Fase) reißt dort ab.
+  const weld = new Int32Array(nV), at = new Map(), cell = x => Math.floor(x / (4 * WELD));
   for (let i = 0; i < nV; i++) {
-    const k = v[3 * i] + ',' + v[3 * i + 1] + ',' + v[3 * i + 2], w = at.get(k);
-    if (w === undefined) at.set(k, i);
+    const q = [v[3 * i], v[3 * i + 1], v[3 * i + 2]], c = q.map(cell);
+    // Nachbarzellen nur, wo der Punkt nahe an ihrer Grenze liegt
+    const offs = q.map((x, k) => [0, ...(x - c[k] * 4 * WELD < WELD ? [-1] : []), ...((c[k] + 1) * 4 * WELD - x < WELD ? [1] : [])]);
+    let w;
+    for (const dx of offs[0]) for (const dy of offs[1]) for (const dz of offs[2]) {
+      for (const j of at.get((c[0] + dx) + ',' + (c[1] + dy) + ',' + (c[2] + dz)) || []) {
+        if (Math.abs(v[3 * j] - q[0]) < WELD && Math.abs(v[3 * j + 1] - q[1]) < WELD && Math.abs(v[3 * j + 2] - q[2]) < WELD) { w = j; break; }
+      }
+      if (w !== undefined) break;
+    }
+    if (w === undefined) {
+      const k = c.join(',');
+      if (!at.has(k)) at.set(k, []);
+      at.get(k).push(i);
+    }
     weld[i] = w ?? i;
   }
 
-  // Nachbarn über gemeinsame Kanten (Paare in Reihenfolge des Auftretens)
+  // Nachbarn über gemeinsame Kanten (Paare in Reihenfolge des Auftretens). Dreiecke, die durch das Zusammenfassen
+  // zu einer Linie werden, zählen nicht.
   const open = new Map(), pairs = [], nb = new Int32Array(nT * 3).fill(-1);
   for (let i = 0; i < nT; i++) for (let e = 0; e < 3; e++) {
     if (!fa[i]) break;
+    const w0 = weld[t[3 * i]], w1 = weld[t[3 * i + 1]], w2 = weld[t[3 * i + 2]];
+    if (w0 === w1 || w1 === w2 || w2 === w0) break;
     const a = weld[t[3 * i + e]], b = weld[t[3 * i + (e + 1) % 3]];
     const key = a < b ? a * nV + b : b * nV + a;
     const j = open.get(key);

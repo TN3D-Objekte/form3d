@@ -299,7 +299,7 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
     const c = triPts(Rm, i), g = [0, 1, 2].map(k => (c[0][k] + c[1][k] + c[2][k]) / 3);
     const L2 = Math.max(...[0, 1, 2].map(k => Math.hypot(...sub(c[(k + 1) % 3], c[k]))));
     if (2 * anR.fa[i] / L2 < 0.005) continue; // Splitter: siehe meshview STEP
-    const n = [anR.fn[3 * i], anR.fn[3 * i + 1], anR.fn[3 * i + 2]];
+    const n = norm(cross(sub(c[1], c[0]), sub(c[2], c[0]))); // eigene Normale: schmale Streifen erben in analyze die eines Nachbarn
     if (!onM(g, 2e-3, n) && !inEndPlane(g, n)) { offArea += anR.fa[i]; offPts.push(g); }
   }
   if (offArea > 2e-3) flag('FREMDFLÄCHE', offArea, offPts);
