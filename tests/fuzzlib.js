@@ -237,9 +237,12 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
   }
   // Wo zwei gewählte Ketten in einer Ecke enden, laufen ihre Werkzeuge bis zur Gehrung über das Kantenende hinaus
   // (an einer einspringenden Ecke liegt sie weit draußen): dort zählt die Verlängerung der Kante mit
+  // Ebenso, wo eine Außenkante an einer nicht gewählten Innenkante endet (Lochecke): Die Rundung endet an der Ebene der
+  // Nachbarwand, an spitzen Ecken ein Stück hinter dem Kantenende (edges.js endExt)
   const shared = new Set([...chainEnds(M, used)].filter(([, l]) => l.length > 1).map(([k]) => k));
-  const ends = used.filter(c => !c.closed).flatMap(c => [[c.segs[0].u, c.segs[0].v], [c.segs.at(-1).v, c.segs.at(-1).u]])
-    .filter(([e]) => shared.has(vkey(M, e))).map(([e, f]) => { const a = P(e); return [a, add(a, norm(sub(a, P(f))), 4 * reach)]; });
+  const concEnds = new Set(chains.filter(c => !c.closed && !used.includes(c) && !isConvex(M, c)).flatMap(c => [vkey(M, c.segs[0].u), vkey(M, c.segs.at(-1).v)]));
+  const ends = used.filter(c => !c.closed).flatMap(c => [[c.segs[0].u, c.segs[0].v, c], [c.segs.at(-1).v, c.segs.at(-1).u, c]])
+    .filter(([e, , c]) => shared.has(vkey(M, e)) || (concEnds.has(vkey(M, e)) && isConvex(M, c))).map(([e, f]) => { const a = P(e); return [a, add(a, norm(sub(a, P(f))), 4 * reach)]; });
   // Die Rundung läuft entlang einer nicht gewählten Kante aus (edges.js runout), wo eine gewählte Kante tangential in
   // sie übergeht, und an Ecken mit gewählten Außen- und Innenkanten (dort nach der Eckfüllung) entlang der nicht
   // gewählten Außenkanten: Diese Kanten zählen auf RUNOUT · Radius mit

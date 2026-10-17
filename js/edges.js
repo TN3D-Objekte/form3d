@@ -282,6 +282,18 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
       // genau eine Endfläche: Seite der Kante behalten
       const ne = ends[0], ce = ends.length === 1 ? dot(ne, out) : 0;
       if (Math.abs(ce) < 0.1) return -GAP;
+      // Außenkante, die in eine Innenecke läuft (z. B. Rand eines Lochs an dessen Ecke, der Nachbarrand nicht gewählt):
+      // Hinter der Ecke liegt Material hinter der Endfläche. Die Rundung endet an der Ebene der Endfläche (wie die
+      // verlängerte Nachbarwand), nicht mit einem Deckel quer zur Kante. Nicht bei Splitterkanten: Deren Richtung ist
+      // zu ungenau für die Verlängerung.
+      const chainLen = chain.pts.reduce((s, q, i) => (i ? s + Math.hypot(...sub(q, chain.pts[i - 1])) : 0), 0);
+      if (convex && ce < -0.1 && chainLen > 0.1 * size) {
+        const o = dot(ne, p);
+        if (!chain.pts.some(q => dot(ne, q) < o - 1e-6)) {
+          trim.push({ n: ne, o });
+          return Math.max(...ring.map(q => (dot(ne, q) - o + 0.05) / -ce), GAP);
+        }
+      }
       // Steht die Endfläche schräg (z. B. spitze Zunge), bliebe zwischen ihrer Ebene und der Ecke ein dünner
       // Keil des Werkzeugs stehen – beim Anfügen frei in der Luft, beim Abziehen als Schlitz im Material.
       // Dann endet das Werkzeug genau im Querschnitt an der Ecke.
