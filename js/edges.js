@@ -7,6 +7,7 @@ const COS_STRAIGHT = Math.cos(1 * Math.PI / 180);
 const EPS = 0.02; // Überstand des Werkzeugs über die Körperflächen hinaus
 const GAP = 1e-3; // Abstand der Werkzeugenden von Endflächen, an denen nicht verlängert werden kann
 const GROW = 0.01; // Versatz des Löschvolumens, siehe edgeTool
+const COS_FACET = Math.cos(10 * Math.PI / 180); // Facetten einer runden Fläche (Kreise mit 64 Ecken: 5,6°)
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b, s = 1) => [a[0] + b[0] * s, a[1] + b[1] * s, a[2] + b[2] * s];
@@ -165,7 +166,7 @@ export function buildEdgeTool(mesh, chain, kind, size, chains = []) {
 // das Volumen gemerkt, mit dem sich die Rundung wieder löschen lässt; so liegen beim Löschen keine
 // Flächen genau aufeinander.
 function edgeTool(mesh, chain, kind, size, grow, chains) {
-  const { fn, weld } = analyze(mesh), { v, t } = mesh, segs = chain.segs, m = segs.length;
+  const { fn, weld, tg } = analyze(mesh), { v, t } = mesh, segs = chain.segs, m = segs.length;
   const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
   const nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
   const dirs = segs.map(s => norm(sub(P(s.v), P(s.u))));
@@ -183,7 +184,7 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
   // Werkzeug davon ab, wo die Kette im Netz beginnt
   const nArc = Math.max(...frames.map(f => profile(f.p, f.tau, f.N1, f.N2, kind, size, sgn, 0).nArc));
   if (!grow) fitsFaces(mesh, segs, kind, size, sgn, surf);
-  const rings = [];
+  const rings = [], curved = [];
   for (let i = 0; i < M; i++) {
     const { near, tau, N1, N2, p } = frames[i];
     const pr = profile(p, tau, N1, N2, kind, size, sgn, grow, nArc, surf), { t1, t2, d } = pr;
@@ -209,6 +210,23 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
       if (k > 1e-9 && [t1, t2].some(tt => dot(tt, norm(kv)) > 0.5) && d > 1.001 / k) throw new Error('Radius zu groß für diese Kante');
     }
     rings.push(pr.ring);
+    curved.push(pr.curved);
+  }
+  // Auf gekrümmten, facettierten Flächen läuft der Rand zwischen zwei Profilen als Sehne unter der Fläche durch
+  // (z. B. am Querloch im Zylinder, wo der Rand weit von der Kante weg liegt). Liegen die Randpunkte weiter als
+  // FINE auseinander, kommen Zwischenprofile auf dem Kantenstück dazu, sonst bliebe dort eine feine Stufe. Nicht
+  // nötig, wo der Randpunkt auf der Achsenlinie liegt (curved nur bei Verschiebung zum nächsten Flächenpunkt):
+  // Dann liegt der Rand zwischen zwei Profilen genau in den Facetten.
+  const FINE = 0.2;
+  for (let i = m - 1; i >= 0; i--) {
+    const j = (i + 1) % M;
+    const gap = Math.max(0, ...[0, 4].filter((e, si) => curved[i][si] || curved[j][si]).map(e => Math.hypot(...sub(rings[i][e], rings[j][e]))));
+    const n = Math.min(32, Math.ceil(gap / FINE));
+    if (n < 2) continue;
+    const a = P(segs[i].u), b = P(segs[i].v), extra = [];
+    const fi = frames[i], fj = frames[j], mix = (x, y, w) => norm(add(x.map(c => c * (1 - w)), y, w));
+    for (let k = 1; k < n; k++) extra.push(profile(add(a, sub(b, a), k / n), mix(fi.tau, fj.tau, k / n), mix(fi.N1, fj.N1, k / n), mix(fi.N2, fj.N2, k / n), kind, size, sgn, grow, nArc, surf).ring);
+    rings.splice(i + 1, 0, ...extra);
   }
 
   // Offene Enden dürfen nicht genau in der Endfläche des Körpers liegen, sonst bleiben hauchdünne
@@ -220,21 +238,43 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
     const taper = (vi, out, s) => runout(mesh, chain, chains, vi, out, s, kind, size, sgn, grow, rings[0].length === 5 ? 0 : rings[0].length - 4, surf);
     const r0 = taper(segs[0].u, dirs[0].map(x => -x), segs[0]), r1 = taper(segs[m - 1].v, dirs[m - 1], segs[m - 1]);
     const endExt = (vi, out, s) => {
-      const n1 = nrm(s.t1), n2 = nrm(s.t2), ends = [];
-      let lo = 1, hi = -1;
-      for (let i = 0; i < t.length; i++) {
-        if (weld[t[i]] !== vi) continue;
-        const ti = (i / 3) | 0, n = nrm(ti);
-        if (!fn[3 * ti] && !fn[3 * ti + 1] && !fn[3 * ti + 2]) continue;
-        if (dot(n, n1) > 0.999 || dot(n, n2) > 0.999) continue;
-        const c = dot(n, out);
-        lo = Math.min(lo, c); hi = Math.max(hi, c);
-        if (!ends.some(e => dot(e, n) > 0.999)) ends.push(n);
+      const n1 = nrm(s.t1), n2 = nrm(s.t2), ends = [], endsTg = [];
+      let lo = 1, hi = -1, pe = P(vi); // pe: Punkt in der Endfläche
+      const collect = at => {
+        for (let i = 0; i < t.length; i++) {
+          if (!at.has(weld[t[i]])) continue;
+          const ti = (i / 3) | 0, n = nrm(ti);
+          if (!fn[3 * ti] && !fn[3 * ti + 1] && !fn[3 * ti + 2]) continue;
+          // auch Nachbarfacetten einer runden Fläche (nicht bei vorhandenen Rundungen: deren erste Facette ist die Endfläche)
+          const tol = tg[ti] ? 0.999 : COS_FACET;
+          if (dot(n, n1) > tol || dot(n, n2) > tol) continue;
+          const c = dot(n, out);
+          lo = Math.min(lo, c); hi = Math.max(hi, c);
+          if (!ends.some(e => dot(e, n) > 0.999)) { ends.push(n); endsTg.push(tg[ti] > 0); }
+        }
+      };
+      collect(new Set([vi]));
+      // Keine Endfläche: Die Kante endet an einer Splitterkante kurz vor der eigentlichen Ecke – deren Flächen zählen
+      if (!ends.length) {
+        const { sharp } = analyze(mesh), at = new Set();
+        for (let k = 0; k < sharp.length; k += 2) {
+          const o = sharp[k] === vi ? sharp[k + 1] : sharp[k + 1] === vi ? sharp[k] : -1;
+          if (o >= 0 && Math.hypot(...sub(P(o), P(vi))) < 0.1 * size + 0.05 && !segs.some(g => g.u === o || g.v === o)) at.add(o);
+        }
+        if (at.size) { collect(at); pe = P([...at][0]); }
       }
       const ring = vi === s.u ? rings[0] : rings[rings.length - 1], p = P(vi);
       const R = Math.max(...ring.map(q => Math.hypot(...sub(q, p))));
       const len = c => { const cc = Math.min(1, Math.max(c, 0.3)); return R * (0.25 + Math.sqrt(1 - cc * cc) / cc); };
       const c = convex ? lo : -hi;
+      // Schnittebenen wirken auf das ganze Werkzeug. Läuft die Kante fast ganz herum (z. B. Rand eines Zylinders, den
+      // eine Tasche anschneidet), läge die Ebene auch durch ihr anderes Ende; dann endet das Werkzeug stattdessen
+      // eben in ihr: das letzte Profil entlang der Kante bis in die Ebene gezogen (behalten wird n·x ≥ o)
+      const local = (n, o) => {
+        const dn = dot(n, out);
+        if (dn > -0.05) return null;
+        return { ring: ring.map(q => add(q, out, Math.max(GAP, (dot(n, q) - o) / -dn))) };
+      };
       if (c >= 0.05) {
         // Die Verlängerung bleibt nur hinter (beim Abziehen: vor) der Endfläche, wenn das Profil nicht seitlich
         // über sie hinausragt. An stumpfen Ecken tut es das. Wird die Nachbarkante (zwischen dieser Fläche und
@@ -251,9 +291,19 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
             if (dot(tk, nj) * sgn > 0) tk = tk.map(x => -x); // in der Fläche von der Kante weg
             if (-sgn * dot(ne, tk) <= 0.05 || dot(ne, nj) > 0.98) continue; // tangential anschließend: keine Ecke
             const keep = filleted(nk) ? norm(sub(ne, nj).map(x => -sgn * x)) : ne.map(x => -sgn * x), o = dot(keep, p) - 0.01;
-            if (chain.pts.some(q => dot(keep, q) < o - 1e-6)) break;
+            if (chain.pts.some(q => dot(keep, q) < o - 1e-6)) return local(keep, o) || len(c);
             trim.push({ n: keep, o });
-            break;
+            return len(c);
+          }
+          // auch sonst knapp hinter der Endfläche enden: Die Verlängerung läge zwar im Freien, könnte aber in einer
+          // schmalen Kerbe (z. B. eine Tasche, die gerade eben die Außenwand durchbricht) die Gegenwand anschneiden.
+          // Nicht an einer vorhandenen Rundung: Wird sie gelöscht, schneidet dieses Werkzeug die Ecke nach. Nicht an einer
+          // runden Endfläche (z. B. Lochwand): Die Ebene einer Facette ließe einen Keil zur übrigen Wand stehen.
+          const planar = surf.every(f => f.blend || dot(f.n, ne) < 0.94 || dot(f.n, ne) > 0.9999 || Math.hypot(...sub(closestOnTri(p, f.c), p)) > R);
+          if (!endsTg[0] && planar) {
+            const keep = ne.map(x => -sgn * x), o = dot(keep, p) - 0.01;
+            if (!chain.pts.some(q => dot(keep, q) < o - 1e-6)) trim.push({ n: keep, o });
+            else return local(keep, o) || len(c);
           }
         }
         return len(c);
@@ -280,7 +330,10 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
         return Math.max(...ring.map(q => (dot(m, q) - o2 + 0.05) / -along), GAP);
       }
       // genau eine Endfläche: Seite der Kante behalten
-      const ne = ends[0], ce = ends.length === 1 ? dot(ne, out) : 0;
+      // Flächen parallel zur Kante (z. B. eine Deckfläche in derselben Ebene wie die Unterseite eines überstehenden
+      // Aufsatzes) beenden sie nicht
+      const term = ends.length > 1 ? ends.filter(n => Math.abs(dot(n, out)) >= 0.1) : ends;
+      const ne = term[0], ce = term.length === 1 ? dot(ne, out) : 0;
       if (Math.abs(ce) < 0.1) return -GAP;
       // Außenkante, die in eine Innenecke läuft (z. B. Rand eines Lochs an dessen Ecke, der Nachbarrand nicht gewählt):
       // Hinter der Ecke liegt Material hinter der Endfläche. Die Rundung endet an der Ebene der Endfläche (wie die
@@ -288,25 +341,29 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
       // zu ungenau für die Verlängerung.
       const chainLen = chain.pts.reduce((s, q, i) => (i ? s + Math.hypot(...sub(q, chain.pts[i - 1])) : 0), 0);
       if (convex && ce < -0.1 && chainLen > 0.1 * size) {
-        const o = dot(ne, p);
-        if (!chain.pts.some(q => dot(ne, q) < o - 1e-6)) {
+        const o = dot(ne, pe);
+        if (!chain.pts.some(q => dot(ne, q) < o - 1e-4)) {
           trim.push({ n: ne, o });
           return Math.max(...ring.map(q => (dot(ne, q) - o + 0.05) / -ce), GAP);
         }
+        const l = local(ne, o);
+        if (l) return l;
       }
       // Steht die Endfläche schräg (z. B. spitze Zunge), bliebe zwischen ihrer Ebene und der Ecke ein dünner
       // Keil des Werkzeugs stehen – beim Anfügen frei in der Luft, beim Abziehen als Schlitz im Material.
       // Dann endet das Werkzeug genau im Querschnitt an der Ecke.
-      const flat = Math.abs(ce) > 0.99, keep = flat ? (ce > 0 ? ne.map(x => -x) : ne) : out.map(x => -x), o = dot(keep, p);
+      const flat = Math.abs(ce) > 0.99, keep = flat ? (ce > 0 ? ne.map(x => -x) : ne) : out.map(x => -x), o = dot(keep, flat ? pe : p);
       if (chain.pts.some(q => dot(keep, q) < o - 1e-6)) return -GAP;
       trim.push({ n: keep, o });
       return len(flat ? Math.abs(ce) : 1);
     };
     const e0 = r0 ? 0 : endExt(segs[0].u, dirs[0].map(x => -x), segs[0]), e1 = r1 ? 0 : endExt(segs[m - 1].v, dirs[m - 1], segs[m - 1]);
     if (r0) rings.unshift(...r0.reverse());
+    else if (e0.ring) rings.unshift(e0.ring);
     else if (e0 > 0) rings.unshift(rings[0].map(q => add(q, dirs[0], -e0)));
     else rings[0] = rings[0].map(q => add(q, dirs[0], GAP));
     if (r1) rings.push(...r1);
+    else if (e1.ring) rings.push(e1.ring);
     else if (e1 > 0) rings.push(rings[rings.length - 1].map(q => add(q, dirs[m - 1], e1)));
     else rings[rings.length - 1] = rings[rings.length - 1].map(q => add(q, dirs[m - 1], -GAP));
   }
@@ -346,7 +403,8 @@ function runout(mesh, chain, chains, vi, out, s0, kind, size, sgn, grow, nArc, s
     len += Math.hypot(...sub(P(next), P(at)));
     from = at; at = next; dir = ed;
   }
-  if (!path.length) return null;
+  // Endet die Kante schon nach einem Splitter an der nächsten Ecke, wäre der Auslauf nur ein Deckel: dann kein Auslauf
+  if (!path.length || len < 0.5 * size) return null;
   const Lt = Math.min(L, len), tau0 = vi === chain.segs[0].u ? -1 : 1; // Profile in Laufrichtung der Kette
   // Abtastung: gleichmäßig bis zur halben Länge, dann zur Spitze hin immer feiner (aufeinanderfolgende Profile
   // ähnlich groß, sonst verdrehte Dreiecke und Kantenkrümel an der Spitze)
@@ -452,7 +510,7 @@ function profile(p, tau, N1, N2, kind, size, sgn, grow, nArc = 0, surf) {
     const eA = norm(sub(A, C)), eB = norm(sub(B, C)), phi = Math.acos(Math.max(-1, Math.min(1, dot(eA, eB))));
     nArc ||= Math.max(3, Math.round(phi / (Math.PI / 24)));
     for (let j = 1; j < nArc; j++) {
-      const s = j / nArc, wa = Math.sin(s * phi) / Math.sin(phi), wb = Math.sin((1 - s) * phi) / Math.sin(phi);
+      const s = j / nArc, sp = Math.sin(phi), wa = phi > 1e-6 ? Math.sin(s * phi) / sp : s, wb = phi > 1e-6 ? Math.sin((1 - s) * phi) / sp : 1 - s; // entartet (Splitterkante längs einer Flächennormale): gerade
       ring.push(add(C, add([eA[0] * wa, eA[1] * wa, eA[2] * wa], eB, wb), size));
     }
     toward = q => norm(sub(C, q));
@@ -473,27 +531,36 @@ function profile(p, tau, N1, N2, kind, size, sgn, grow, nArc = 0, surf) {
       for (const f of surf) {
         const c = dot(f.n, N);
         // winzige Dreiecke (Splitter aus Booleschen Operationen) haben ungenaue Normalen
-        if (f.blend || f.area < 1e-3 || c < 0.9 || c <= dot(f.n, No) || f.c.every(q => Math.hypot(...sub(q, p)) > reach)) continue;
+        if (f.blend || f.area < 1e-3 || c < 0.9 || c <= dot(f.n, No) || Math.hypot(...sub(closestOnTri(p, f.c), p)) > reach) continue;
         if (!ns.some(n => dot(n, f.n) > 1 - 1e-9)) ns.push(f.n);
       }
       let lo = 1, ax = null;
       for (let a = 0; a < ns.length; a++) for (let b = a + 1; b < ns.length; b++) { const c = dot(ns[a], ns[b]); if (c < lo) { lo = c; ax = norm(cross(ns[a], ns[b])); } }
       if (lo > 0.99996) continue; // eben (Facetten weniger als 0,5° gegeneinander geneigt)
-      let to = null;
-      if (ns.every(n => Math.abs(dot(n, ax)) < 2e-3)) {
-        const c = dot(ax, tt);
-        if (Math.abs(c) > 0.2) to = add(p, ax, d / c);
-      }
-      if (!to) {
-        let bd = 0.3 * d;
+      const closest = (q0, lim) => {
+        let bd = lim, q = null;
         for (const f of surf) {
           const c = dot(f.n, N);
           if (c < 0.9 || c <= dot(f.n, No)) continue;
-          const q = closestOnTri(ring[end], f.c), dd = Math.hypot(...sub(q, ring[end]));
-          if (dd < bd) { bd = dd; to = q; }
+          const x = closestOnTri(q0, f.c), dd = Math.hypot(...sub(x, q0));
+          if (dd < bd) { bd = dd; q = x; }
         }
+        return q;
+      };
+      // Läuft die Kante fast parallel zur Achse (z. B. seitlich an einem Querloch im Zylinder), läge der Punkt auf der
+      // Achsenlinie ein Vielfaches von d entfernt: Dann gilt der nächste Flächenpunkt, dazwischen weich überblendet
+      let to = null, wAx = 0;
+      if (ns.every(n => Math.abs(dot(n, ax)) < 2e-3)) {
+        const c = dot(ax, tt), x = Math.min(1, Math.max(0, (Math.abs(c) - 0.45) / 0.15));
+        wAx = x * x * (3 - 2 * x);
+        if (wAx > 0) to = add(p, ax, d / c);
       }
-      if (to) shifts[si] = { shift: sub(to, ring[end]), out: norm(sub(to, p)) };
+      if (wAx < 1) {
+        const q = closest(ring[end], 0.3 * d);
+        if (to && q) to = closest(add(q.map(x => x * (1 - wAx)), to, wAx), d) || to;
+        else if (q) to = q;
+      }
+      if (to) shifts[si] = { shift: sub(to, ring[end]), out: norm(sub(to, p)), exact: wAx === 1 };
     }
   }
   if (grow) {
@@ -502,14 +569,19 @@ function profile(p, tau, N1, N2, kind, size, sgn, grow, nArc = 0, surf) {
     // wie die Rundung, und beim Zurückfügen bleiben dort hauchdünne Splitter stehen
     for (const [si, [, , tt, end, eps]] of sides.entries()) for (const j of [end, eps]) ring[j] = add(ring[j], shifts[si]?.out || tt, grow);
   }
-  for (const [si, [, , , end, eps, w]] of sides.entries()) {
+  for (const [si, [N, , , end, eps, w]] of sides.entries()) {
     const sh = shifts[si]?.shift;
     if (!sh) continue;
     ring[end] = add(ring[end], sh);
+    // Der Hilfspunkt außerhalb sinkt nicht mit, wo die Fläche von der Kante weg abfällt (z. B. Zylinder an einem
+    // Querloch): Sie wölbt sich sonst zwischen Kante und Rand über die Außenseite des Werkzeugs, und ein dünner
+    // Streifen Material bliebe stehen
+    const h = dot(sh, N);
     ring[eps] = add(ring[eps], sh);
+    if (sgn * h < 0) ring[eps] = add(ring[eps], N, -h);
     for (let j = 5; j < ring.length; j++) ring[j] = add(ring[j], sh, w(j));
   }
-  return { ring, nArc, t1, t2, d };
+  return { ring, nArc, t1, t2, d, curved: shifts.map(x => !!x && !x.exact) };
 }
 
 // Röhre durch die Profile rings (offen: mit Deckeln), nach außen orientiert. mesh.f markiert die
