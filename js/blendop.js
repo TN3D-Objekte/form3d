@@ -41,13 +41,28 @@ export function withTransitions(old, r) {
 // senkrechte Ecken und Boden innen), entstehen erst die Innenrundungen. Ihre Füllung reicht in der Ecke bis an die
 // Oberfläche; dort entsteht eine neue Bogenkante. Die Außenrundung läuft dann über den Rand und diese Bögen – sonst
 // stünde die Füllung als Ohr über dem gerundeten Rand.
+// Umgekehrt an Ecken mit einer Außen- und zwei Innenkanten (z. B. Ecke eines Aufsatzes: senkrechte Kante und beide
+// Fußkanten): erst die Außenrundung. Ihr Fuß ist ein Innenbogen, der tangential an beide Fußkanten anschließt; die
+// Innenrundung läuft dann in einem Zug um die Ecke, statt um die scharfe Kante gedreht zu werden.
 export function edgeResult(b, picked, kind, size) {
   const conv = picked.filter(c => isConvex(b.mesh, c)), conc = picked.filter(c => !isConvex(b.mesh, c));
   if (conv.length && conc.length && touching(b.mesh, conv, conc)) {
+    if (cornerKinds(b.mesh, conv, conc).every(([nx, nc]) => nx === 1 && nc === 2)) {
+      try {
+        const r1 = K.blendFeatures(b.mesh, edgeTools(b, conv, kind, size, true, conc));
+        if (r1.mesh) {
+          const b1 = { mesh: r1.mesh, features: [...(b.features || []), ...r1.features] }, next = followChains(b.mesh, r1.mesh, conc, kind, size, false);
+          if (next.length) {
+            const r2 = K.blendFeatures(b1.mesh, edgeTools(b1, next, kind, size, false));
+            if (r2.mesh) return { mesh: r2.mesh, features: [...r1.features, ...r2.features] };
+          }
+        }
+      } catch (e) { if (/Radius zu groß/.test(e.message)) throw e; console.warn('Rundung in zwei Phasen nicht möglich', e); }
+    }
     try {
       const r1 = K.blendFeatures(b.mesh, edgeTools(b, conc, kind, size, true, conv));
       if (r1.mesh) {
-        const b1 = { mesh: r1.mesh, features: [...(b.features || []), ...r1.features] }, next = followChains(b.mesh, r1.mesh, conv);
+        const b1 = { mesh: r1.mesh, features: [...(b.features || []), ...r1.features] }, next = followChains(b.mesh, r1.mesh, conv, kind, size);
         if (next.length) {
           const r2 = K.blendFeatures(b1.mesh, edgeTools(b1, next, kind, size, false)); // nicht um die ganze Tasche weiterlaufen
           if (r2.mesh) return { mesh: r2.mesh, features: [...r1.features, ...r2.features] };
@@ -66,19 +81,39 @@ function segDist(q, a, b) {
   return dist(q, a.map((x, k) => x + ab[k] * u));
 }
 const ends = (mesh, c) => (c.closed ? [] : [pt(mesh, c.segs[0].u), pt(mesh, c.segs[c.segs.length - 1].v)]);
+// je Ecke, an der Ketten aus a und b enden: [Zahl der Enden aus a, Zahl der Enden aus b]
+function cornerKinds(mesh, a, b) {
+  const at = [];
+  for (const [list, k] of [[a, 0], [b, 1]]) for (const c of list) for (const p of ends(mesh, c)) {
+    let e = at.find(x => dist(x.p, p) < 1e-4);
+    if (!e) at.push(e = { p, n: [0, 0] });
+    e.n[k]++;
+  }
+  return at.filter(e => e.n[0] && e.n[1]).map(e => e.n);
+}
 const touching = (mesh, a, b) => a.some(c => ends(mesh, c).some(p => b.some(d => ends(mesh, d).some(q => dist(p, q) < 1e-4))));
 
 // Außenkanten nach den Innenrundungen wiederfinden: Stücke der gewählten Kanten (liegen auf ihnen) und neue Kanten,
-// die an ein solches Stück anschließen und nicht auf einer alten Kante liegen (Bogen um die Eckfüllung)
-function followChains(M, M1, conv) {
+// die an ein solches Stück anschließen und nicht auf einer alten Kante liegen (Bogen um die Eckfüllung). Splitterkanten
+// mit ungenauen Flächennormalen (auch Stücke der gewählten Kanten, z. B. eine Messerschneide aus zwei entgegengesetzten
+// Flächen) zählen nicht: Ihr Werkzeug ragte weit über die Kante hinaus.
+// convex = false: ebenso für Innenkanten (Bogen am Fuß einer Außenrundung).
+function followChains(M, M1, conv, kind, size, convex = true) {
   const segsOf = (mesh, list) => list.flatMap(c => c.segs.map(g => [pt(mesh, g.u), pt(mesh, g.v)]));
   const old = segsOf(M, conv), an = analyze(M), sharp = [];
   for (let s = 0; s < an.sharp.length; s += 2) sharp.push([pt(M, an.sharp[s]), pt(M, an.sharp[s + 1])]);
   const on = (c, segs) => c.segs.every(g => { const a = pt(M1, g.u), b = pt(M1, g.v), m = a.map((x, k) => (x + b[k]) / 2); return segs.some(([p, q]) => segDist(m, p, q) < 1e-3); });
-  const cand = edgeChains(M1).filter(c => isConvex(M1, c)), rim = cand.filter(c => on(c, old));
+  const cand = edgeChains(M1).filter(c => isConvex(M1, c) === convex), rim = cand.filter(c => on(c, old));
   const tips = rim.flatMap(c => ends(M1, c));
-  const arcs = cand.filter(c => !rim.includes(c) && !on(c, sharp) && ends(M1, c).some(p => tips.some(q => dist(p, q) < 1e-4)));
-  return [...rim, ...arcs];
+  const sane = c => {
+    try {
+      const t = buildEdgeTool(M1, c, kind, size, [c]), lim = 20 * size + 5;
+      for (let i = 0; i < t.mesh.v.length; i++) if (!c.pts.some(q => Math.abs(q[i % 3] - t.mesh.v[i]) < lim)) return false;
+      return true;
+    } catch (e) { return true; } // Radius zu groß o. Ä.: wie gewählt weiterreichen, der Schritt meldet es dann
+  };
+  const arcs = cand.filter(c => !rim.includes(c) && !on(c, sharp) && ends(M1, c).some(p => tips.some(q => dist(p, q) < 1e-4)) && sane(c));
+  return [...rim.filter(sane), ...arcs];
 }
 
 // Ganzer Schritt wie beim Tippen auf „Fertig“: neues Netz und alle Rundungen/Fasen des Körpers
