@@ -110,7 +110,9 @@ export function boolean(op, a, b) {
   return toMesh(op === 'union' ? A.add(B) : op === 'subtract' ? A.subtract(B) : A.intersect(B));
 }
 
-export const unionAll = meshes => meshes.reduce((a, b) => boolean('union', a, b));
+// in einem Schritt (Manifold vereinigt alle zusammen): paarweise nacheinander wüchse die Zeit quadratisch mit der Zahl
+// der Körper, z. B. 121 Kantenwerkzeuge an einem Lochraster
+export const unionAll = meshes => (meshes.length === 1 ? meshes[0] : toMesh(Manifold.union(meshes.map(toManifold))));
 
 // Kantenwerkzeug markieren (Rundungs-/Fasenfläche bekommt t.tag) und an seinen Ebenen abschneiden
 // (behalten wird n·x ≥ o). Die Schnittfläche soll genau in der Körperfläche liegen; das gilt erst

@@ -104,8 +104,13 @@ function followChains(M, M1, conv, kind, size, convex = true) {
   const segsOf = (mesh, list) => list.flatMap(c => c.segs.map(g => [pt(mesh, g.u), pt(mesh, g.v)]));
   const old = segsOf(M, conv), an = analyze(M), sharp = [];
   for (let s = 0; s < an.sharp.length; s += 2) sharp.push([pt(M, an.sharp[s]), pt(M, an.sharp[s + 1])]);
-  const on = (c, segs) => c.segs.every(g => { const a = pt(M1, g.u), b = pt(M1, g.v), m = a.map((x, k) => (x + b[k]) / 2); return segs.some(([p, q]) => segDist(m, p, q) < 1e-3); });
-  const cand = edgeChains(M1).filter(c => isConvex(M1, c) === convex), rim = cand.filter(c => on(c, old));
+  const onSeg = (g, segs) => { const a = pt(M1, g.u), b = pt(M1, g.v), m = a.map((x, k) => (x + b[k]) / 2); return segs.some(([p, q]) => segDist(m, p, q) < 1e-3); };
+  const on = (c, segs) => c.segs.every(g => onSeg(g, segs));
+  // Stücke der gewählten Kanten; flach abknickend kann eine Kette über die neue Kante der Füllung hinweg weiterlaufen
+  // (z. B. Rand eines Achtecks: Rand, Füllung, Rand je 22,5° geknickt) – dann zählt sie ganz, sofern ihre übrigen
+  // Stücke auf keiner alten Kante liegen
+  const cand = edgeChains(M1).filter(c => isConvex(M1, c) === convex);
+  const rim = cand.filter(c => on(c, old) || (c.segs.some(g => onSeg(g, old)) && c.segs.every(g => onSeg(g, old) || !onSeg(g, sharp))));
   const tips = rim.flatMap(c => ends(M1, c));
   const sane = c => {
     try {

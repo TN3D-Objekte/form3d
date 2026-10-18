@@ -300,8 +300,10 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
   // Ausnahme: Endet eine Rundung allein an einer Ecke, darf ihr Ende in der Ebene einer dort anstoßenden Fläche
   // liegen (z. B. Bodenkante eines L-Profils, die an der Innenecke endet: dort entsteht eine kleine ebene Endfläche).
   const endPlanes = [], usedEnds = chainEnds(M, used);
+  // Ebenso an Enden gewählter Innenkanten: Ihre Füllung reicht in einer Ecke bis an die Oberfläche, darüber setzt sich
+  // die angrenzende Fläche eben fort (z. B. Deckfläche über der gefüllten Spitze eines dreieckigen Lochs)
   for (const [k, list] of usedEnds) {
-    if (list.length !== 1) continue;
+    if (list.length !== 1 && list.every(i => isConvex(M, used[i]))) continue;
     const p = k.split(',').map(Number), pl = [];
     for (let i = 0; i < M.t.length; i++) {
       if (vkey(M, M.t[i]) !== k) continue;
