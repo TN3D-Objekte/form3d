@@ -244,8 +244,9 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
   const ends = used.filter(c => !c.closed).flatMap(c => [[c.segs[0].u, c.segs[0].v, c], [c.segs.at(-1).v, c.segs.at(-1).u, c]])
     .filter(([e, , c]) => shared.has(vkey(M, e)) || (concEnds.has(vkey(M, e)) && isConvex(M, c))).map(([e, f]) => { const a = P(e); return [a, add(a, norm(sub(a, P(f))), 4 * reach)]; });
   // Die Rundung läuft entlang einer nicht gewählten Kante aus (edges.js runout), wo eine gewählte Kante tangential in
-  // sie übergeht, und an Ecken mit gewählten Außen- und Innenkanten (dort nach der Eckfüllung) entlang der nicht
-  // gewählten Außenkanten: Diese Kanten zählen auf RUNOUT · Radius mit
+  // sie übergeht, und an Ecken mit gewählten Außen- und Innenkanten entlang der nicht gewählten Kanten (Außenkanten
+  // nach der Eckfüllung, Innenkanten am Fuß einer zuerst angelegten Außenrundung, blendop.edgeResult): Diese Kanten
+  // zählen auf RUNOUT · Radius mit
   const usedSet = new Set(used), COS_TAN = Math.cos(20 * Math.PI / 180);
   let runouts = 0;
   const runSegs = [];
@@ -255,7 +256,7 @@ export function check(M, Rm, selIdx, kind, size, hadFeatures) {
     for (const c of chains) {
       if (usedSet.has(c) || c.closed) continue;
       let pts = vkey(M, c.segs[0].u) === k ? c.pts : vkey(M, c.segs.at(-1).v) === k ? c.pts.slice().reverse() : null;
-      if (pts && !(mixed && isConvex(M, c)) && !outs.some(([d, cx]) => cx === isConvex(M, c) && dot(d, norm(sub(pts[1], pts[0]))) > COS_TAN)) pts = null;
+      if (pts && !mixed && !outs.some(([d, cx]) => cx === isConvex(M, c) && dot(d, norm(sub(pts[1], pts[0]))) > COS_TAN)) pts = null;
       if (pts) runouts++;
       for (let i = 1, l = 0; pts && i < pts.length && l < 3 * size + reach; i++) { ends.push([pts[i - 1], pts[i]]); runSegs.push([pts[i - 1], pts[i]]); l += Math.hypot(...sub(pts[i], pts[i - 1])); }
     }

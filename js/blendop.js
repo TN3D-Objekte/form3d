@@ -42,12 +42,14 @@ export function withTransitions(old, r) {
 // Oberfläche; dort entsteht eine neue Bogenkante. Die Außenrundung läuft dann über den Rand und diese Bögen – sonst
 // stünde die Füllung als Ohr über dem gerundeten Rand.
 // Umgekehrt an Ecken mit einer Außen- und zwei Innenkanten (z. B. Ecke eines Aufsatzes: senkrechte Kante und beide
-// Fußkanten): erst die Außenrundung. Ihr Fuß ist ein Innenbogen, der tangential an beide Fußkanten anschließt; die
+// Fußkanten; bei Rundungen darf die zweite Innenkante auch ungewählt sein, die Rundung läuft dann an ihr aus): erst
+// die Außenrundung. Ihr Fuß ist ein Innenbogen, der tangential an beide Fußkanten anschließt; die
 // Innenrundung läuft dann in einem Zug um die Ecke, statt um die scharfe Kante gedreht zu werden.
 export function edgeResult(b, picked, kind, size) {
   const conv = picked.filter(c => isConvex(b.mesh, c)), conc = picked.filter(c => !isConvex(b.mesh, c));
   if (conv.length && conc.length && touching(b.mesh, conv, conc)) {
-    if (cornerKinds(b.mesh, conv, conc).every(([nx, nc]) => nx === 1 && nc === 2)) {
+    const other = edgeChains(b.mesh).filter(c => !picked.includes(c) && !isConvex(b.mesh, c));
+    if (cornerKinds(b.mesh, conv, conc, other).every(([nx, nc, no]) => nx === 1 && nc + no === 2 && (nc === 2 || kind === 'fillet'))) {
       try {
         const r1 = K.blendFeatures(b.mesh, edgeTools(b, conv, kind, size, true, conc));
         if (r1.mesh) {
@@ -81,12 +83,12 @@ function segDist(q, a, b) {
   return dist(q, a.map((x, k) => x + ab[k] * u));
 }
 const ends = (mesh, c) => (c.closed ? [] : [pt(mesh, c.segs[0].u), pt(mesh, c.segs[c.segs.length - 1].v)]);
-// je Ecke, an der Ketten aus a und b enden: [Zahl der Enden aus a, Zahl der Enden aus b]
-function cornerKinds(mesh, a, b) {
+// je Ecke, an der Ketten aus a und b enden: [Zahl der Enden aus a, aus b, aus o]
+function cornerKinds(mesh, a, b, o = []) {
   const at = [];
-  for (const [list, k] of [[a, 0], [b, 1]]) for (const c of list) for (const p of ends(mesh, c)) {
+  for (const [list, k] of [[a, 0], [b, 1], [o, 2]]) for (const c of list) for (const p of ends(mesh, c)) {
     let e = at.find(x => dist(x.p, p) < 1e-4);
-    if (!e) at.push(e = { p, n: [0, 0] });
+    if (!e) { if (k === 2) continue; at.push(e = { p, n: [0, 0, 0] }); }
     e.n[k]++;
   }
   return at.filter(e => e.n[0] && e.n[1]).map(e => e.n);
