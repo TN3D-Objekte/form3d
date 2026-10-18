@@ -11,11 +11,11 @@ export function nextTag(b) {
 }
 
 // Werkzeuge für Rundung/Fase: tangential anschließende Kanten laufen mit (extend), außer der Radius ist dafür
-// zu groß (dann nur die angetippten Kanten)
-export function edgeTools(b, picked, kind, size, extend = true) {
+// zu groß (dann nur die angetippten Kanten). also: siehe edges.buildEdgeTool
+export function edgeTools(b, picked, kind, size, extend = true, also = []) {
   const make = list => {
     const chains = joinChains(b.mesh, list), base = nextTag(b);
-    const ts = [...chains.map(ch => buildEdgeTool(b.mesh, ch, kind, size, chains)), ...cornerTools(b.mesh, chains, kind, size)];
+    const ts = [...chains.map(ch => buildEdgeTool(b.mesh, ch, kind, size, chains, also)), ...cornerTools(b.mesh, chains, kind, size)];
     ts.forEach((t, i) => Object.assign(t, { tag: base + i, kind, size, links: t.chains?.map(ci => base + ci) }));
     return ts;
   };
@@ -45,7 +45,7 @@ export function edgeResult(b, picked, kind, size) {
   const conv = picked.filter(c => isConvex(b.mesh, c)), conc = picked.filter(c => !isConvex(b.mesh, c));
   if (conv.length && conc.length && touching(b.mesh, conv, conc)) {
     try {
-      const r1 = K.blendFeatures(b.mesh, edgeTools(b, conc, kind, size));
+      const r1 = K.blendFeatures(b.mesh, edgeTools(b, conc, kind, size, true, conv));
       if (r1.mesh) {
         const b1 = { mesh: r1.mesh, features: [...(b.features || []), ...r1.features] }, next = followChains(b.mesh, r1.mesh, conv);
         if (next.length) {

@@ -157,15 +157,16 @@ export function isConvex(mesh, chain) {
 
 // Werkzeugkörper für eine Kante. Konvexe Kanten: Werkzeug wird abgezogen, konkave: angefügt.
 // trim: Ebenen { n, o }, an denen der Kern das Werkzeug abschneidet (behalten wird n·x ≥ o).
-// chains: alle Kanten, die im selben Schritt verrundet werden (für die Enden an gemeinsamen Ecken).
-export function buildEdgeTool(mesh, chain, kind, size, chains = []) {
-  return { ...edgeTool(mesh, chain, kind, size, 0, chains), heal: edgeTool(mesh, chain, kind, size, GROW, chains).mesh };
+// chains: alle Kanten, die im selben Schritt verrundet werden (für die Enden an gemeinsamen Ecken); also: weitere
+// gewählte Kanten, die erst danach verrundet werden (Außenkanten an gemischten Ecken, siehe blendop.edgeResult).
+export function buildEdgeTool(mesh, chain, kind, size, chains = [], also = []) {
+  return { ...edgeTool(mesh, chain, kind, size, 0, chains, also), heal: edgeTool(mesh, chain, kind, size, GROW, chains, also).mesh };
 }
 
 // grow: Profil um diesen Betrag ins Material (bzw. bei Innenkanten in den Hohlraum) versetzt. Daraus wird
 // das Volumen gemerkt, mit dem sich die Rundung wieder löschen lässt; so liegen beim Löschen keine
 // Flächen genau aufeinander.
-function edgeTool(mesh, chain, kind, size, grow, chains) {
+function edgeTool(mesh, chain, kind, size, grow, chains, also) {
   const { fn, weld, tg } = analyze(mesh), { v, t } = mesh, segs = chain.segs, m = segs.length;
   const P = i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]];
   const nrm = ti => [fn[3 * ti], fn[3 * ti + 1], fn[3 * ti + 2]];
@@ -340,13 +341,18 @@ function edgeTool(mesh, chain, kind, size, grow, chains) {
       // verlängerte Nachbarwand), nicht mit einem Deckel quer zur Kante. Nicht bei Splitterkanten: Deren Richtung ist
       // zu ungenau für die Verlängerung.
       const chainLen = chain.pts.reduce((s, q, i) => (i ? s + Math.hypot(...sub(q, chain.pts[i - 1])) : 0), 0);
-      if (convex && ce < -0.1 && chainLen > 0.1 * size) {
-        const o = dot(ne, pe);
-        if (!chain.pts.some(q => dot(ne, q) < o - 1e-4)) {
-          trim.push({ n: ne, o });
-          return Math.max(...ring.map(q => (dot(ne, q) - o + 0.05) / -ce), GAP);
+      // Ebenso eine Innenkante, die an einer Außenecke endet (z. B. Fuß eines eckigen Aufsatzes, die Nachbarkante nicht
+      // gewählt): Die Rundung endet bündig mit der verlängerten Nachbarwand statt mit einem vorstehenden Deckel. Endet
+      // dort eine weitere gewählte Kante, läuft die Rundung um die Ecke (wrapTool) und endet im Querschnitt.
+      const alone = ![...chains, ...also].some(o => o !== chain && !o.closed && (o.segs[0].u === vi || o.segs[o.segs.length - 1].v === vi));
+      const kn = convex ? ne : ne.map(x => -x), ck = convex ? ce : alone ? -ce : 0;
+      if (ck < -0.1 && chainLen > 0.1 * size) {
+        const o = dot(kn, pe);
+        if (!chain.pts.some(q => dot(kn, q) < o - 1e-4)) {
+          trim.push({ n: kn, o });
+          return Math.max(...ring.map(q => (dot(kn, q) - o + 0.05) / -ck), GAP);
         }
-        const l = local(ne, o);
+        const l = local(kn, o);
         if (l) return l;
       }
       // Steht die Endfläche schräg (z. B. spitze Zunge), bliebe zwischen ihrer Ebene und der Ecke ein dünner
