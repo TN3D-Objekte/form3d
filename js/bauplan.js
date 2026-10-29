@@ -294,7 +294,7 @@ function printHints(list) {
     const { current, best } = bestOrientation(mesh);
     if (current.over > 60) { // kleine Querbohrungen und Langlöcher drucken noch ohne Stützen
       const dn = best.down.map(Math.round).join(','), better = best.score < current.score * 0.6 && Object.keys(DIRS).find(k => DIRS[k].join(',') === dn);
-      out.push(`„${name}“ hat ${f(current.over)} mm² Überhang steiler als ${LIMITS.overhang}° (braucht Stützmaterial) – Fasen 45° statt Rundungen nach unten, Bohrungen quer zur Platte vermeiden` +
+      out.push(`„${name}“ hat ${f(current.over)} mm² Überhang steiler als ${LIMITS.overhang}° und braucht so Stützmaterial – ohne Stützen umkonstruieren: 45°-Fasen/Schrägen statt Rundungen und Waagerechten nach unten, Querbohrungen als Tropfenform, sonst Teil teilen` +
         (better && better !== 'unten' ? `; liegt besser mit der Seite „${better}“ nach unten` : ''));
     }
     if (!features.length) out.push(`„${name}“: keine Kante gebrochen – unten Fase 0,4–0,6 mm, oben und an Griffkanten Rundung oder Fase`);

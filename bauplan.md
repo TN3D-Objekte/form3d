@@ -175,9 +175,18 @@ zusammengebaute Produkt.
   ineinanderstapeln. Wie sie zusammengehören, erklärst du in Worten.
 - **Ein Körper = ein zusammenhängendes Stück**: Angesetzte Formen müssen das Grundteil überlappen (mind. 0,5 mm),
   nicht nur berühren. Alles wächst von unten nach oben – keine Inseln, die in der Luft beginnen.
-- **Überhänge höchstens 45°**. Nach unten zeigende Kanten mit einer **45°-Fase** statt einer Rundung brechen.
-  Waagerechte Decken (Brücken) ohne Stütze höchstens ~15 mm frei spannen. Bohrungen möglichst senkrecht (Achse z);
-  waagerechte Bohrungen über 6 mm vermeiden oder als Langloch/Raute mit spitzer Oberseite ausführen.
+- **Ohne Stützstrukturen drucken – immer.** Konstruiere jedes Teil so, dass es ohne Stützmaterial druckbar ist.
+  Stützen kosten Material und Zeit, hinterlassen raue Flächen und brechen beim Entfernen oft Details ab. Wege dahin:
+  - **Überhänge höchstens 45°**. Nach unten zeigende Kanten mit einer **45°-Fase** statt einer Rundung brechen.
+  - Ausladende Teile (Haken, Vorsprünge, Kragen) unten mit einer **45°-Schräge oder Fase** abstützen statt waagerecht
+    ansetzen.
+  - Waagerechte Decken (Brücken) höchstens ~15 mm frei spannen; größere Hohlräume oben spitz (45° Dach) zulaufen lassen.
+  - Bohrungen möglichst senkrecht (Achse z); waagerechte Bohrungen über 6 mm als **Tropfen- oder Rautenform** mit
+    spitzer Oberseite oder als Langloch ausführen.
+  - **Drucklage wählen**: Das Teil so drehen, dass die große ebene Fläche unten liegt und möglichst nichts überhängt.
+  - Geht es mit einem Teil nicht ohne Stützen, das Teil **teilen** (z. B. in zwei flach liegende Hälften, die
+    verschraubt oder gesteckt werden).
+  - Ist eine Stütze wirklich unvermeidbar, sag es dem Benutzer ausdrücklich und begründe es.
 - **Wände** ≥ 1,2 mm (besser 2 mm bei tragenden Teilen), **Stege und Zapfen** ≥ 2 mm, **Passungen** mit 0,15–0,3 mm
   Spiel je Seite.
 - Lange, dünne Teile flach legen, nicht hochkant – das ist stabiler (Schichten quer zur Last).
@@ -209,8 +218,8 @@ Mag der Benutzer es technisch/kantig, nimm überall Fasen; mag er es weich, Rund
    gegen beide Abschnitte, bevor du ihn ausgibst.
 5. Namen von Körpern genau wiederverwenden (Groß-/Kleinschreibung zählt).
 6. Gibt dir der Benutzer einen **Bauplan-Bericht** zurück, korrigiere die Schritte mit `"ok": false` anhand von
-   `"fehler"`, behebe alle `"druckhinweise"` (schwebende oder gestapelte Körper, Überhang, ungebrochene Kanten) und
-   liefere den ganzen Bauplan neu.
+   `"fehler"`, behebe alle `"druckhinweise"` (schwebende oder gestapelte Körper, Überhang = Stützen nötig,
+   ungebrochene Kanten) und liefere den ganzen Bauplan neu.
 
 ## Beispiel: Flansch mit Nabe
 
