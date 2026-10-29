@@ -29,7 +29,7 @@ const cube = new ViewCube($('viewcube'), vp);
 vp.onAfterRender = () => cube.render();
 vp.cube = cube;
 const sel = { bodies: [], face: null, regions: [], ents: [], edges: [], con: null };
-const st = { tool: 'select', sketchId: null, pickPlane: false, pendingTool: null, xf: null, last: null, refs: [], check: false };
+const st = { tool: 'select', sketchId: null, pickPlane: false, pendingTool: null, xf: null, last: null, refs: [], check: false, selPt: null, loupe: null };
 // Aktiver Vorgang. Wird ein Vorgang mit restore (Rundung/Fase bearbeiten) anders als über Fertig verlassen,
 // stellt restore den vorherigen Körper wieder her.
 let curOp = null;
@@ -726,6 +726,18 @@ function sketchGrab(e, only) {
 // aktuelle Lage eines ziehbaren Punktes
 const entPoint = (s, id, key) => { const e = s.entities.find(x => x.id === id); return e && S.entityPoints(e).find(([k]) => k === key)?.[1]; };
 
+// gewählter Skizzenpunkt: einmal antippen, danach direkt ziehen
+const selectPoint = g => { st.selPt = g?.key ? { sketchId: g.s.id, id: g.id, key: g.key } : null; };
+const selPtPos = () => { const q = st.selPt, s = q && sketch(q.sketchId); return s && entPoint(s, q.id, q.key); };
+const isSelPt = g => { const q = selPtPos(); return !!(q && g?.key && g.s.id === st.selPt.sketchId && S.same2(q, g.q)); };
+
+// Lupe über dem Finger (nur Android): zeigt, was unter dem Finger liegt
+const loupeOK = /Android/i.test(navigator.userAgent) || new URLSearchParams(location.search).has('lupe');
+function showLoupe(e, p, s) {
+  st.loupe = e && e.type === 'touch' && loupeOK && p ? { x: e.x, y: e.y, p, s } : null;
+  vp.requestRender();
+}
+
 function dragSketch(g, e) {
   const sn = snap(e, g.s, g.skip), ent = g.orig.find(x => x.id === g.id), opt = {};
   if (!sn) return;
@@ -739,6 +751,7 @@ function dragSketch(g, e) {
   const keep = g.s.entities;
   g.s.entities = structuredClone(g.orig); // immer vom Ausgangszustand lösen, damit nichts wegdriftet
   if (!solveSketch(g.s, opt)) g.s.entities = keep;
+  showLoupe(e, g.key ? entPoint(g.s, g.id, g.key) : sn.p, g.s);
   syncSketches();
   vp.requestRender();
 }
@@ -764,6 +777,7 @@ const selectTool = {
     if (skDrag) {
       if (!skDrag.moved && Math.hypot(e.x - skDrag.x, e.y - skDrag.y) < 6) return;
       skDrag.moved = true;
+      if (skDrag.key) selectPoint(skDrag);
       return dragSketch(skDrag, e);
     }
     const o = st.op, s = drag && axisParam(e, drag.origin, drag.n);
@@ -775,13 +789,18 @@ const selectTool = {
   onUp(e) {
     const g = skDrag;
     drag = skDrag = null;
-    if (g) g.moved ? commit() : pick(e, false);
+    showLoupe(null);
+    if (!g) return;
+    if (g.moved) commit();
+    else if (g.key) { selectPoint(g); vp.requestRender(); } // Endpunkt antippen wählt ihn aus
+    else { selectPoint(null); pick(e, false); }
   },
   onCancel() {
     if (skDrag?.moved) { skDrag.s.entities = skDrag.orig; sync(); }
     drag = skDrag = null;
+    showLoupe(null);
   },
-  onTap(e) { pick(e, false); },
+  onTap(e) { selectPoint(null); pick(e, false); },
   onDoubleTap(e) { pick(e, true); },
 };
 
@@ -807,7 +826,7 @@ function endSketch() {
   if (!st.sketchId) return;
   const s = sketch(st.sketchId);
   st.sketchId = null;
-  st.last = null;
+  st.last = st.selPt = null;
   vp.setWorkPlane(null);
   if (s && !s.entities.length) doc.sketches = doc.sketches.filter(x => x !== s);
 }
@@ -917,13 +936,16 @@ function makeDrawTool(kind) {
       const s = snapPt(e);
       if (!s) return false;
       downP = s.p; downXY = [e.x, e.y]; dragging = false; hover = s;
+      showLoupe(e, s.p, sketch(st.sketchId));
       endHold();
-      const g = !pts.length && sketchGrab(e, sketch(st.sketchId));
-      if (g?.key) {
+      const g = (!pts.length || (pts.length === 1 && S.same2(pts[0], s.p))) && sketchGrab(e, sketch(st.sketchId));
+      if (g?.key && isSelPt(g)) hold = { g, on: true, now: true }; // gewählter Punkt: sofort verschieben
+      else if (g?.key && !pts.length) {
         hold = { g, on: false };
         holdTimer = setTimeout(() => {
           if (!hold || dragging) return;
           hold.on = true; hover = null;
+          pts = []; chainStart = null;
           navigator.vibrate?.(20);
           vp.requestRender();
         }, 450);
@@ -932,19 +954,27 @@ function makeDrawTool(kind) {
       return true;
     },
     onMove(e) {
-      if (hold?.on) { hold.g.moved = true; return dragSketch(hold.g, e); }
+      if (hold?.on) {
+        if (!hold.g.moved && Math.hypot(e.x - downXY[0], e.y - downXY[1]) < 6) return;
+        if (!hold.g.moved) { pts = []; chainStart = null; hover = null; selectPoint(hold.g); }
+        hold.g.moved = true;
+        return dragSketch(hold.g, e);
+      }
       if (!dragging && Math.hypot(e.x - downXY[0], e.y - downXY[1]) > 10) { dragging = true; endHold(); }
       hover = snapPt(e) || hover;
-      vp.requestRender();
+      showLoupe(e, hover?.p, sketch(st.sketchId));
     },
     onUp(e) {
-      if (hold?.on) {
+      showLoupe(null);
+      if (hold?.on && (hold.g.moved || !hold.now)) {
         const g = hold.g;
         endHold();
         downP = null;
         if (g.moved) { st.last = null; commit(); } else vp.requestRender();
         return;
       }
+      // Endpunkt antippen wählt ihn aus (und beginnt wie bisher dort eine Linie)
+      if (!dragging) selectPoint(hold?.g || null);
       endHold();
       const up = snapPt(e)?.p || downP;
       if (!dragging) addPoint(downP);
@@ -955,6 +985,7 @@ function makeDrawTool(kind) {
       sync();
     },
     onCancel() {
+      showLoupe(null);
       if (hold?.g.moved) { hold.g.s.entities = hold.g.orig; sync(); }
       endHold(); downP = null; dragging = false; hover = null; vp.requestRender();
     },
@@ -1282,7 +1313,7 @@ function renderBar() {
     L({ line: 'Linie', rect: 'Rechteck', circle: 'Kreis', arc: 'Bogen' }[st.tool]);
     const fields = lastFields();
     if (fields.length) items.push(...fields);
-    else L((st.tool === 'arc' ? 'Start, Ende, dann Bogenpunkt setzen' : 'Ziehen oder Punkte antippen') + ' · Endpunkt halten: verschieben', true);
+    else L((st.tool === 'arc' ? 'Start, Ende, dann Bogenpunkt setzen' : 'Ziehen oder Punkte antippen') + ' · Endpunkt antippen, dann ziehen: verschieben', true);
     if (drawTool?.busy()) B('Zug beenden', null, () => { drawTool.reset(); renderBar(); });
     sep();
     B('Skizze beenden', 'check', () => { endSketch(); setSelectTool(); sync(); }, 'primary');
@@ -1761,7 +1792,8 @@ vp.onOverlay = ctx => {
     }
     drawBadges(ctx, s);
     // Endpunkte: in der aktiven Skizze als gut greifbare Ringe, sonst als kleine Punkte
-    const g = skDrag?.s === s ? skDrag : drawTool?.held?.(), gq = g?.s === s && g.key && entPoint(g.s, g.id, g.key);
+    const g = skDrag?.s === s ? skDrag : drawTool?.held?.();
+    const gq = g?.s === s && g.key ? entPoint(g.s, g.id, g.key) : st.selPt?.sketchId === s.id && selPtPos();
     for (const q of r.ends) {
       if (!vp.project(q.v, tv)) continue;
       const on = gq && S.same2(q.p, gq);
@@ -1805,7 +1837,37 @@ vp.onOverlay = ctx => {
     ctx.stroke();
   }
   const pv = s && drawTool && isDraw(st.tool) && drawTool.preview();
-  if (!pv) return;
+  if (pv) drawPreview(ctx, s, pv);
+  if (st.loupe) drawLoupe(ctx, st.loupe);
+};
+
+// Lupe: vergrößerter Ausschnitt um den Punkt unter dem Finger, darüber (oben kein Platz: darunter)
+function drawLoupe(ctx, L) {
+  if (!L.s || !vp.project(V3(S.to3D(L.s.plane, L.p)), tv)) return;
+  const R = 58, Z = 2, gap = 70, cx0 = tv.x, cy0 = tv.y;
+  const x = Math.max(R + 4, Math.min(vp.w - R - 4, L.x)), y = L.y - gap - R > 4 ? L.y - gap - R : L.y + gap + R;
+  const dpr = ctx.canvas.width / vp.w, r = R / Z;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, R, 0, 7);
+  ctx.clip();
+  ctx.fillStyle = '#f3f4f6';
+  ctx.fillRect(x - R, y - R, 2 * R, 2 * R);
+  for (const c of [vp.renderer.domElement, ctx.canvas]) ctx.drawImage(c, (cx0 - r) * dpr, (cy0 - r) * dpr, 2 * r * dpr, 2 * r * dpr, x - R, y - R, 2 * R, 2 * R);
+  ctx.strokeStyle = '#e5484d';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x - 10, y); ctx.lineTo(x + 10, y); ctx.moveTo(x, y - 10); ctx.lineTo(x, y + 10);
+  ctx.stroke();
+  ctx.restore();
+  ctx.beginPath();
+  ctx.arc(x, y, R, 0, 7);
+  ctx.strokeStyle = '#111827';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function drawPreview(ctx, s, pv) {
   const to3 = p => V3(S.to3D(s.plane, p));
   ctx.beginPath();
   for (const e of pv.ents) tracePath(ctx, S.tessellate(e).map(to3));
@@ -1829,7 +1891,7 @@ vp.onOverlay = ctx => {
     ctx.fillStyle = '#fff';
     ctx.fillText(pv.label, x + 21, y - 17.5);
   }
-};
+}
 
 // ---------------------------------------------------------------- Tastatur
 addEventListener('keydown', e => {

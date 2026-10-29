@@ -199,7 +199,8 @@ export function showHelp(device = 'tablet', onDevice) {
         <li>${device === 'pc' ? 'Mit der Maus' : device === 'phone' ? 'Mit einem Finger' : 'Mit dem <b>Apple Pencil</b> (ohne Stift mit dem Finger)'} zeichnen: ziehen oder Punkt für Punkt tippen</li>
         <li>Maße nach dem Zeichnen in der Leiste unten antippen und exakt eingeben</li>
         <li>Orange Marken zeigen <b>Kantenmitten</b> (Dreieck) und <b>Mittelpunkte</b> (Kreuz) – darauf wird gefangen; die Rasterweite steht unten rechts</li>
-        <li><b>Punkte und Linien ziehen</b>, um die Skizze zu ändern; Linie oder Kreis antippen für Bedingungen (horizontal, parallel, gleich, tangential …)</li></ul></div>
+        <li><b>Punkte und Linien ziehen</b>, um die Skizze zu ändern; Linie oder Kreis antippen für Bedingungen (horizontal, parallel, gleich, tangential …)</li>
+        <li><b>Endpunkt antippen</b> (wird blau), dann ziehen – verschiebt ihn auch im Zeichenwerkzeug${device === 'phone' ? '; auf Android zeigt eine <b>Lupe</b> über dem Finger, was darunter liegt' : ''}</li></ul></div>
       <div><h3>Körper formen</h3><ul>
         <li><b>Skizzenfläche antippen</b> und am Pfeil ziehen – extrudieren</li>
         <li><b>Körperfläche antippen</b> und am Pfeil ziehen – drücken/ziehen</li>

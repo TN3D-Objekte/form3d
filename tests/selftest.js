@@ -85,6 +85,14 @@ try {
   fire('pointerup', ...scr(110, -10, 0));
   log(corners() === '[[60,-60],[110,-60],[110,-10],[60,-10]]' && skNow().entities.length === 5, 'Endpunkt im Linienwerkzeug gehalten und gezogen: ' + corners());
   document.getElementById('btn-undo').click();
+  // Endpunkt einmal antippen wählt ihn aus, danach lässt er sich sofort ziehen
+  railPick('line');
+  tap(...scr(100, -20, 0));
+  log(st.selPt != null, 'Endpunkt angetippt und gewählt');
+  if (stopAt === 'lupe') { document.getElementById('help').hidden = true; pid++; const o = { pt: 'touch' }; fire('pointerdown', ...scr(100, -20, 0), o); fire('pointermove', ...scr(103, -17, 0), o); fire('pointermove', ...scr(106, -16, 0), o); out.remove(); throw 0; }
+  dragTo(...scr(100, -20, 0), ...scr(110, -10, 0));
+  log(corners() === '[[60,-60],[110,-60],[110,-10],[60,-10]]' && skNow().entities.length === 5, 'Gewählten Endpunkt ohne Halten gezogen: ' + corners());
+  document.getElementById('btn-undo').click();
   // Bogen von Endpunkt zu Endpunkt: Bogenpunkt auf der Linie zählt nicht, daneben schon
   railPick('arc');
   tap(...scr(60, -60, 0)); tap(...scr(100, -60, 0)); tap(...scr(80, -60, 0));
