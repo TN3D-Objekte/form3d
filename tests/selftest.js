@@ -76,6 +76,24 @@ try {
   log(corners() === '[[60,-60],[110,-60],[110,-10],[60,-10]]', 'Ecke gezogen: ' + corners());
   document.getElementById('btn-undo').click();
   log(corners() === '[[60,-60],[100,-60],[100,-20],[60,-20]]', 'Rückgängig stellt die Skizze wieder her');
+  // im Zeichenwerkzeug: Endpunkt gedrückt halten, dann ziehen verschiebt ihn statt neu zu zeichnen
+  railPick('line');
+  pid++;
+  fire('pointerdown', ...scr(100, -20, 0));
+  await wait(550);
+  for (let i = 1; i <= 6; i++) fire('pointermove', ...scr(100 + i * 10 / 6, -20 + i * 10 / 6, 0));
+  fire('pointerup', ...scr(110, -10, 0));
+  log(corners() === '[[60,-60],[110,-60],[110,-10],[60,-10]]' && skNow().entities.length === 5, 'Endpunkt im Linienwerkzeug gehalten und gezogen: ' + corners());
+  document.getElementById('btn-undo').click();
+  // Bogen von Endpunkt zu Endpunkt: Bogenpunkt auf der Linie zählt nicht, daneben schon
+  railPick('arc');
+  tap(...scr(60, -60, 0)); tap(...scr(100, -60, 0)); tap(...scr(80, -60, 0));
+  log(skNow().entities.length === 5, 'Bogenpunkt auf der Verbindungslinie erzeugt keine doppelte Linie');
+  tap(...scr(80, -70, 0));
+  const arcE = skNow().entities[5];
+  log(arcE?.type === 'arc' && Math.abs(arcE.r - 25) < 1e-6, 'Bogen über der Unterkante, r=' + arcE?.r);
+  document.getElementById('btn-undo').click();
+  railPick('select');
   // Linie antippen → Länge als Maß setzen, danach Maß-Marke antippen und löschen
   tap(...scr(80, -60, 0));
   log(sel.ents.length === 1, 'Skizzenlinie gewählt');

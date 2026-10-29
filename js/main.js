@@ -144,9 +144,13 @@ function sketchRt(s) {
     r = {
       key,
       regions: S.computeRegions(s.entities),
-      polys: s.entities.map(e => ({ id: e.id, dots: e.type === 'line', pts: S.tessellate(e).map(p => V3(S.to3D(s.plane, p))) })),
+      polys: s.entities.map(e => ({ id: e.id, pts: S.tessellate(e).map(p => V3(S.to3D(s.plane, p))) })),
       snaps: S.snapCandidates(s.entities),
+      ends: [], // ziehbare End- und Bogenpunkte, jeder Punkt nur einmal
     };
+    for (const e of s.entities) for (const [k, p] of S.entityPoints(e)) {
+      if (k !== 'c' && !r.ends.some(q => S.same2(q.p, p))) r.ends.push({ p, v: V3(S.to3D(s.plane, p)) });
+    }
     rt.set(s.id, r);
   }
   return r;
@@ -697,9 +701,9 @@ function axisParam(e, origin, n) {
 }
 
 // Skizzenpunkt (bevorzugt) oder Linie/Kreis unter dem Zeiger, der sich ziehen lässt
-function sketchGrab(e) {
+function sketchGrab(e, only) {
   let best = null;
-  for (const s of doc.sketches) {
+  for (const s of only ? [only] : doc.sketches) {
     if (!s.visible) continue;
     const p = vp.planePoint(e.x, e.y, s.plane);
     if (!p) continue;
@@ -718,6 +722,9 @@ function sketchGrab(e) {
   if (best.key) for (const ent of best.s.entities) if (S.entityPoints(ent).some(([, q]) => S.same2(q, best.q))) skip.add(ent.id);
   return { ...best, skip, x: e.x, y: e.y, moved: false, orig: structuredClone(best.s.entities) };
 }
+
+// aktuelle Lage eines ziehbaren Punktes
+const entPoint = (s, id, key) => { const e = s.entities.find(x => x.id === id); return e && S.entityPoints(e).find(([k]) => k === key)?.[1]; };
 
 function dragSketch(g, e) {
   const sn = snap(e, g.s, g.skip), ent = g.orig.find(x => x.id === g.id), opt = {};
@@ -828,13 +835,13 @@ const pickTool = {
   },
 };
 
-function snap(e, s = sketch(st.sketchId), skip) {
+function snap(e, s = sketch(st.sketchId), skip, ok) {
   const raw = s && vp.planePoint(e.x, e.y, s.plane);
   if (!raw) return null;
   const px = vp.pxSize(V3(S.to3D(s.plane, raw)));
   let best = null, bd = (e.type === 'touch' ? 18 : 11) * px;
   for (const list of [sketchRt(s).snaps, s.id === st.sketchId ? st.refs : []]) for (const c of list) {
-    if (skip?.has(c.e)) continue;
+    if (skip?.has(c.e) || (ok && !ok(c.p))) continue;
     const d = S.dist2(c.p, raw);
     if (d < bd) { bd = d; best = c; }
   }
@@ -849,6 +856,15 @@ const rectLines = (a, b) => [[a, [b[0], a[1]]], [[b[0], a[1]], b], [b, [a[0], b[
 function makeDrawTool(kind) {
   const need = kind === 'arc' ? 3 : 2;
   let pts = [], downP = null, downXY = null, dragging = false, hover = null, chainStart = null;
+  let hold = null, holdTimer = 0; // Endpunkt gedrückt halten → Punkt verschieben statt neu zeichnen
+  const endHold = () => { clearTimeout(holdTimer); hold = null; };
+  // der Bogenpunkt darf nicht auf der Geraden durch Start und Ende liegen
+  const offChord = p => {
+    if (kind !== 'arc' || pts.length !== 2) return true;
+    const [a, b] = pts, l = S.dist2(a, b) || 1;
+    return Math.abs((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) / l > 1e-3 * l;
+  };
+  const snapPt = e => snap(e, undefined, undefined, offChord);
 
   function finalize() {
     const s = sketch(st.sketchId), [a, b, c] = pts;
@@ -873,9 +889,10 @@ function makeDrawTool(kind) {
       pts = [];
       st.last = { kind, sketchId: s.id, ids: [add({ type: 'circle', c: a, r: S.dist2(a, b) })] };
     } else {
-      pts = [];
       const arc = S.arcFrom3(a, b, c);
-      add(arc ? { type: 'arc', ...arc } : { type: 'line', a, b });
+      if (!arc) { pts = [a, b]; return UI.toast('Bogenpunkt neben die Verbindung von Start und Ende setzen'); }
+      pts = [];
+      add({ type: 'arc', ...arc });
     }
     commit();
   }
@@ -892,23 +909,44 @@ function makeDrawTool(kind) {
 
   return {
     kind,
-    reset() { pts = []; downP = null; dragging = false; hover = null; chainStart = null; vp.requestRender(); },
+    reset() { endHold(); pts = []; downP = null; dragging = false; hover = null; chainStart = null; vp.requestRender(); },
     busy: () => pts.length > 0,
+    held: () => hold?.on && hold.g,
     onDown(e) {
       if (fingersNavOnly(e)) return false;
-      const s = snap(e);
+      const s = snapPt(e);
       if (!s) return false;
       downP = s.p; downXY = [e.x, e.y]; dragging = false; hover = s;
+      endHold();
+      const g = !pts.length && sketchGrab(e, sketch(st.sketchId));
+      if (g?.key) {
+        hold = { g, on: false };
+        holdTimer = setTimeout(() => {
+          if (!hold || dragging) return;
+          hold.on = true; hover = null;
+          navigator.vibrate?.(20);
+          vp.requestRender();
+        }, 450);
+      }
       vp.requestRender();
       return true;
     },
     onMove(e) {
-      if (!dragging && Math.hypot(e.x - downXY[0], e.y - downXY[1]) > 10) dragging = true;
-      hover = snap(e) || hover;
+      if (hold?.on) { hold.g.moved = true; return dragSketch(hold.g, e); }
+      if (!dragging && Math.hypot(e.x - downXY[0], e.y - downXY[1]) > 10) { dragging = true; endHold(); }
+      hover = snapPt(e) || hover;
       vp.requestRender();
     },
     onUp(e) {
-      const up = snap(e)?.p || downP;
+      if (hold?.on) {
+        const g = hold.g;
+        endHold();
+        downP = null;
+        if (g.moved) { st.last = null; commit(); } else vp.requestRender();
+        return;
+      }
+      endHold();
+      const up = snapPt(e)?.p || downP;
       if (!dragging) addPoint(downP);
       else if (kind === 'arc' && pts.length === 2) addPoint(up);
       else { pts = []; chainStart = null; addPoint(downP); addPoint(up); }
@@ -916,8 +954,11 @@ function makeDrawTool(kind) {
       if (e.type === 'touch') hover = null;
       sync();
     },
-    onCancel() { downP = null; dragging = false; hover = null; vp.requestRender(); },
-    onHover(e) { hover = snap(e); vp.requestRender(); },
+    onCancel() {
+      if (hold?.g.moved) { hold.g.s.entities = hold.g.orig; sync(); }
+      endHold(); downP = null; dragging = false; hover = null; vp.requestRender();
+    },
+    onHover(e) { hover = snapPt(e); vp.requestRender(); },
     // temporäre Elemente für die Vorschau
     preview() {
       if (!hover) return null;
@@ -1241,7 +1282,7 @@ function renderBar() {
     L({ line: 'Linie', rect: 'Rechteck', circle: 'Kreis', arc: 'Bogen' }[st.tool]);
     const fields = lastFields();
     if (fields.length) items.push(...fields);
-    else L(st.tool === 'arc' ? 'Start, Ende, dann Bogenpunkt setzen' : 'Ziehen oder Punkte antippen', true);
+    else L((st.tool === 'arc' ? 'Start, Ende, dann Bogenpunkt setzen' : 'Ziehen oder Punkte antippen') + ' · Endpunkt halten: verschieben', true);
     if (drawTool?.busy()) B('Zug beenden', null, () => { drawTool.reset(); renderBar(); });
     sep();
     B('Skizze beenden', 'check', () => { endSketch(); setSelectTool(); sync(); }, 'primary');
@@ -1719,9 +1760,16 @@ vp.onOverlay = ctx => {
       ctx.stroke();
     }
     drawBadges(ctx, s);
-    if (active) {
-      ctx.fillStyle = '#111827';
-      for (const pl of r.polys) if (pl.dots) for (const p of pl.pts) if (vp.project(p, tv)) { ctx.beginPath(); ctx.arc(tv.x, tv.y, 2.6, 0, 7); ctx.fill(); }
+    // Endpunkte: in der aktiven Skizze als gut greifbare Ringe, sonst als kleine Punkte
+    const g = skDrag?.s === s ? skDrag : drawTool?.held?.(), gq = g?.s === s && g.key && entPoint(g.s, g.id, g.key);
+    for (const q of r.ends) {
+      if (!vp.project(q.v, tv)) continue;
+      const on = gq && S.same2(q.p, gq);
+      ctx.beginPath();
+      ctx.arc(tv.x, tv.y, on ? 7 : active ? 4.5 : 2.6, 0, 7);
+      ctx.fillStyle = on ? '#2563eb' : active ? '#fff' : '#566170';
+      ctx.fill();
+      if (active && !on) { ctx.strokeStyle = '#111827'; ctx.lineWidth = 1.6; ctx.stroke(); }
     }
   }
   if (sel.edges.length) {
