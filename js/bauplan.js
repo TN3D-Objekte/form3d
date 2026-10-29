@@ -7,6 +7,7 @@ import * as Parts from './parts.js';
 import { analyze } from './meshview.js';
 import { edgeChains, isConvex } from './edges.js';
 import { applyEdges } from './blendop.js';
+import { bestOrientation, LIMITS } from './printcheck.js';
 
 export const FORMAT = 'form3d-bauplan/1';
 const SEGS = 64; // Kreisteilung wie in Skizzen
@@ -279,7 +280,32 @@ export function runBauplan(plan) {
     const bb = [0, 1, 2].map(k => { let lo = Infinity, hi = -Infinity; for (let i = k; i < b.mesh.v.length; i += 3) { lo = Math.min(lo, b.mesh.v[i]); hi = Math.max(hi, b.mesh.v[i]); } return [+lo.toFixed(2), +hi.toFixed(2)]; });
     return { ...b, info: { name: b.name, volumen: +K.props(b.mesh).volume.toFixed(1), box: bb, teile: K.topology(b.mesh).parts } };
   });
-  return { name: plan.name || 'Bauplan', bodies: list, report, ok: report.every(r => r.ok) };
+  return { name: plan.name || 'Bauplan', bodies: list, report, ok: report.every(r => r.ok), druck: printHints(list) };
+}
+
+// Druckprüfung der fertigen Körper: Jeder Körper wird so gedruckt, wie er liegt – getrennt auf der Druckplatte.
+function printHints(list) {
+  const out = [], f = x => +x.toFixed(1);
+  for (const { name, mesh, features, info: { box, teile } } of list) {
+    const z = box[2];
+    if (z[0] > 0.05) out.push(`„${name}“ schwebt: Unterkante bei z = ${f(z[0])} – jeder Körper muss auf der Druckplatte (z = 0) liegen`);
+    if (z[0] < -0.05) out.push(`„${name}“ ragt unter die Druckplatte (z = ${f(z[0])}) – auf z = 0 stellen`);
+    if (teile > 1) out.push(`„${name}“ besteht aus ${teile} getrennten Stücken – Teile müssen sich überlappen (vereinigen), lose Stücke fallen beim Drucken um`);
+    const { current, best } = bestOrientation(mesh);
+    if (current.over > 60) { // kleine Querbohrungen und Langlöcher drucken noch ohne Stützen
+      const dn = best.down.map(Math.round).join(','), better = best.score < current.score * 0.6 && Object.keys(DIRS).find(k => DIRS[k].join(',') === dn);
+      out.push(`„${name}“ hat ${f(current.over)} mm² Überhang steiler als ${LIMITS.overhang}° (braucht Stützmaterial) – Fasen 45° statt Rundungen nach unten, Bohrungen quer zur Platte vermeiden` +
+        (better && better !== 'unten' ? `; liegt besser mit der Seite „${better}“ nach unten` : ''));
+    }
+    if (!features.length) out.push(`„${name}“: keine Kante gebrochen – unten Fase 0,4–0,6 mm, oben und an Griffkanten Rundung oder Fase`);
+  }
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i].info.box, b = list[j].info.box, gap = k => Math.max(a[k][0] - b[k][1], b[k][0] - a[k][1]);
+    const gx = gap(0), gy = gap(1);
+    if (gx < 0 && gy < 0) out.push(`„${list[i].name}“ und „${list[j].name}“ liegen über- oder ineinander – zum Drucken nebeneinander auf die Platte legen (≥ 5 mm Abstand)`);
+    else if (Math.max(gx, gy) < 3) out.push(`„${list[i].name}“ und „${list[j].name}“ liegen nur ${f(Math.max(gx, gy))} mm auseinander – mindestens 5 mm Abstand lassen`);
+  }
+  return out;
 }
 
 // Bauplan in einen Link packen (#bauplan=…, Base64url) und wieder auslesen

@@ -1654,11 +1654,12 @@ function loadBauplan(text, replace) {
   }
   if (replace) resetHistory(); else commit();
   vp.fit(sceneBox());
-  const out = { ok: res.ok, schritte: res.report, koerper: res.bodies.map(b => b.info) };
+  const out = { ok: res.ok, schritte: res.report, koerper: res.bodies.map(b => b.info), ...(res.druck.length && { druckhinweise: res.druck }) };
   window.form3d.lastBauplan = out;
   const err = res.report.filter(r => !r.ok);
-  UI.toast(err.length ? `Bauplan: ${err.length} Schritt${err.length > 1 ? 'e' : ''} mit Fehler – Bericht im Menü` : `Bauplan gebaut: ${res.bodies.length} Körper`, 4000);
-  if (err.length) showBauplanReport();
+  UI.toast(err.length ? `Bauplan: ${err.length} Schritt${err.length > 1 ? 'e' : ''} mit Fehler – Bericht im Menü`
+    : `Bauplan gebaut: ${res.bodies.length} Körper` + (res.druck.length ? `, ${res.druck.length} Druckhinweis${res.druck.length > 1 ? 'e' : ''}` : ''), 4000);
+  if (err.length || res.druck.length) showBauplanReport();
   return out;
 }
 
@@ -1669,6 +1670,8 @@ function showBauplanReport() {
   const text = JSON.stringify(r, null, 1);
   UI.openDialog('Bauplan-Bericht', [
     UI.h('p', {}, r.ok ? 'Alle Schritte gebaut.' : 'Einige Schritte sind fehlgeschlagen. Den Bericht der KI geben, damit sie den Bauplan korrigiert.'),
+    ...(r.druckhinweise ? [UI.h('p', {}, 'So lässt sich das Modell noch nicht gut drucken. Den Bericht der KI geben, damit sie den Bauplan verbessert:'),
+      UI.h('ul', {}, ...r.druckhinweise.map(t => UI.h('li', {}, t)))] : []),
     UI.h('pre', {}, text),
   ], [
     { label: 'Bericht kopieren', onClick: () => { navigator.clipboard?.writeText(text).then(() => UI.toast('Bericht kopiert')); return true; } },

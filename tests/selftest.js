@@ -699,10 +699,15 @@ try {
     const md = await (await fetch('bauplan.md')).text(), res = [];
     for (const [, name, json] of md.matchAll(/## Beispiel: (.+)\n\n```json\n([\s\S]*?)```/g)) {
       const r = window.form3d.bauplan(json, true);
-      res.push(`${name}: ${r.ok ? 'ok' : JSON.stringify(r.schritte?.filter(s => !s.ok) || r.fehler)}, ${doc.bodies.length} Körper, ${doc.bodies.map(b => b.features?.length || 0).join('/')} Rundungen/Fasen`);
+      res.push(`${name}: ${r.ok && !r.druckhinweise ? 'ok' : JSON.stringify(r.schritte?.filter(s => !s.ok) || r.fehler) + JSON.stringify(r.druckhinweise)}, ${doc.bodies.length} Körper, ${doc.bodies.map(b => b.features?.length || 0).join('/')} Rundungen/Fasen`);
     }
     const bad = window.form3d.bauplan({ schritte: [{ op: 'quader', name: 'A', l: 10, b: 10, h: 5 }, { op: 'rundung', ziel: 'A', r: 1, kanten: { z: 99 } }] }, true);
     const why = bad.schritte?.[1]?.fehler || '';
+    // gestapelt und schwebend: der Bericht meldet es als Druckhinweis
+    const stack = window.form3d.bauplan({ schritte: [{ op: 'quader', name: 'Unten', l: 20, b: 20, h: 5 }, { op: 'quader', name: 'Oben', l: 20, b: 20, h: 5, pos: [0, 0, 5] },
+      { op: 'zylinder', name: 'Tisch', d: 6, h: 12, pos: [60, 0, 0] }, { op: 'quader', l: 30, b: 30, h: 3, pos: [60, 0, 10], ziel: 'Tisch', modus: 'vereinigen' }] }, true);
+    const dh = stack.druckhinweise || [];
+    log(dh.some(t => /schwebt/.test(t)) && dh.some(t => /über- oder ineinander/.test(t)) && dh.some(t => /keine Kante gebrochen/.test(t)) && dh.some(t => /„Tisch“ hat \d+.*Überhang/.test(t)), 'Druckhinweise: ' + dh.join(' | '));
     log(res.length >= 2 && res.every(x => x.includes(': ok')) && !bad.ok && /keine Kante|Kein Kantenfilter/i.test(why), `Bauplan-Beispiele: ${res.join(' · ')}; Fehlermeldung: ${why}`);
     document.getElementById('help').hidden = true;
   }
